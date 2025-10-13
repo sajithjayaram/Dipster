@@ -249,11 +249,16 @@ async def call_openai_recommendation(symbol: str, timeframe: str, indicators: Di
         tight = resp.output_parsed
         # Adapt to full schema by adding indicators snapshot and timestamp
         snap = indicators['snapshot']
+        # Normalize confidence to 0-100 scale if model returned 0-1
+        conf = float(tight.confidence)
+        if conf <= 1.0:
+            conf = round(conf * 100.0, 2)
+        conf = max(0.0, min(100.0, conf))
         return AIRecommendation(
             symbol=tight.symbol,
             timeframe=tight.timeframe,
             action=tight.action,
-            confidence=tight.confidence,
+            confidence=conf,
             reasons=tight.reasons,
             indicators_snapshot=snap,
             stop_loss=tight.stop_loss,
