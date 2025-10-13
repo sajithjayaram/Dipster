@@ -11,7 +11,8 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '.
 import { Separator } from './components/ui/separator.jsx';
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from './components/ui/command.jsx';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from './components/ui/dialog.jsx';
-import { BarChart3, Activity, AlertTriangle, Search, User } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from './components/ui/tabs.jsx';
+import { BarChart3, Activity, AlertTriangle, Search, User, LogIn } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -53,13 +54,24 @@ function Home() {
   const [model, setModel] = useState(() => sessionStorage.getItem('llm_model') || 'gpt-5-mini');
   const [llmKey, setLlmKey] = useState(() => sessionStorage.getItem('llm_key') || '');
 
+  // telegram settings
+  const [tgEnabled, setTgEnabled] = useState(false);
+  const [tgChatId, setTgChatId] = useState('');
+  const [tgBuy, setTgBuy] = useState(80);
+  const [tgSell, setTgSell] = useState(60);
+
   // search state
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [openSearch, setOpenSearch] = useState(false);
   const debounceRef = useRef(null);
 
+  // history state
+  const [activeTab, setActiveTab] = useState('current');
+  const [historyMap, setHistoryMap] = useState({}); // { `${symbol}-${timeframe}`: items[] }
+
   const isAuthed = !!token;
+  const loadedWatchlistOnce = useRef(false);
 
   const setSession = (t) => {
     if (t) { sessionStorage.setItem('token', t); setToken(t); }
@@ -72,18 +84,48 @@ function Home() {
     if (key !== undefined) { sessionStorage.setItem('llm_key', key); setLlmKey(key); }
   };
 
+  // Capture JWT from Google callback (?token=...)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get('token');
+    if (t) {
+      setSession(t);
+      window.history.replaceState(null, '', window.location.pathname);
+      toast.success('Logged in with Google');
+    }
+  }, []);
+
   // ------- AUTH -------
   const fetchMe = async (tok) => {
     try {
       const res = await axios.get(`${API}/auth/me`, { headers: { Authorization: `Bearer ${tok}` } });
       setEmail(res.data.email);
-      // preload profile
       setProvider(res.data.profile?.provider || 'openai');
       setModel(res.data.profile?.model || 'gpt-5-mini');
     } catch { /* ignore */ }
   };
 
-  useEffect(() => { if (token) fetchMe(token); }, [token]);
+  const fetchWatchlist = async (tok) => {
+    try {
+      const res = await axios.get(`${API}/portfolio/watchlist`, { headers: { Authorization: `Bearer ${tok}` } });
+      if (Array.isArray(res.data?.symbols) && res.data.symbols.length) {
+        setSymbols(res.data.symbols);
+      }
+      loadedWatchlistOnce.current = true;
+    } catch { loadedWatchlistOnce.current = true; }
+  };
+
+  const fetchTelegramCfg = async (tok) => {
+    try {
+      const res = await axios.get(`${API}/alerts/telegram/config`, { headers: { Authorization: `Bearer ${tok}` } });
+      setTgEnabled(!!res.data.enabled);
+      setTgChatId(res.data.chat_id || '');
+      setTgBuy(res.data.buy_threshold ?? 80);
+      setTgSell(res.data.sell_threshold ?? 60);
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => { if (token) { fetchMe(token); fetchWatchlist(token); fetchTelegramCfg(token); } }, [token]);
 
   const handleAuth = async () => {
     if (!authEmail || !authPassword) { toast.error('Enter email and password'); return; }
@@ -110,6 +152,8 @@ function Home() {
     try {
       await axios.put(`${API}/profile`, { provider, model }, { headers: { Authorization: `Bearer ${token}` } });
       saveSessionLLM(provider, model, llmKey);
+      // save telegram cfg too
+      await axios.post(`${API}/alerts/telegram/config`, { chat_id: tgChatId || null, enabled: tgEnabled, buy_threshold: tgBuy, sell_threshold: tgSell }, { headers: { Authorization: `Bearer ${token}` } });
       toast.success('Profile saved');
       setProfileOpen(false);
     } catch (e) {
@@ -134,11 +178,25 @@ function Home() {
     const S = (s || '').trim().toUpperCase();
     if (!S) return;
     if (symbols.includes(S)) { toast.info('Already on watchlist'); return; }
-    setSymbols(prev => [S, ...prev]);
+    const next = [S, ...symbols];
+    setSymbols(next);
     setQuery(''); setResults([]); setOpenSearch(false);
     toast.success(`${S} added`);
+    // persist server-side if authed
+    if (isAuthed && loadedWatchlistOnce.current) {
+      axios.put(`${API}/portfolio/watchlist`, { symbols: next }, { headers: { Authorization: `Bearer ${token}` } }).catch(()=>{});
+    }
   };
 
+  const removeFromWatchlist = (s) => {
+    const next = symbols.filter(x => x !== s);
+    setSymbols(next);
+    if (isAuthed && loadedWatchlistOnce.current) {
+      axios.put(`${API}/portfolio/watchlist`, { symbols: next }, { headers: { Authorization: `Bearer ${token}` } }).catch(()=>{});
+    }
+  };
+
+  // ------- ANALYZE -------
   const analyze = async (s) => {
     if (!llmKey) { toast.error('Set your API key in Profile'); return; }
     setLoadingMap(m => ({ ...m, [s]: true }));
@@ -181,6 +239,20 @@ function Home() {
 
   useEffect(() => { symbols.forEach(s => analyze(s)); }, []);
 
+  const openGoogleLogin = () => {
+    window.location.href = `${API}/auth/google/login`;
+  };
+
+  const fetchHistory = async (s) => {
+    if (!isAuthed) return;
+    const key = `${s}-${timeframe}`;
+    if (historyMap[key]) return; // already loaded
+    try {
+      const res = await axios.get(`${API}/portfolio/history`, { params: { symbol: s, timeframe, limit: 10 }, headers: { Authorization: `Bearer ${token}` } });
+      setHistoryMap(prev => ({ ...prev, [key]: res.data?.items || [] }));
+    } catch { /* ignore */ }
+  };
+
   return (
     <div className="app-shell">
       <div className="header">
@@ -202,8 +274,8 @@ function Home() {
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>Profile: Model & Key</DialogTitle>
-                      <DialogDescription>Choose provider, model, and set your session API key. We never store your key on the server.</DialogDescription>
+                      <DialogTitle>Profile: Model, Key & Alerts</DialogTitle>
+                      <DialogDescription>Choose provider/model, set your session API key, and manage Telegram alerts. Keys are never stored on server.</DialogDescription>
                     </DialogHeader>
                     <div className="grid" style={{ gap: 12 }}>
                       <div>
@@ -225,6 +297,28 @@ function Home() {
                         <Label className="text-sm">Session API key</Label>
                         <Input data-testid="session-key-input" type="password" placeholder="Paste your API key" value={llmKey} onChange={e=>setLlmKey(e.target.value)} />
                       </div>
+                      <Separator />
+                      <div style={{ display:'grid', gap:8 }}>
+                        <Label className="text-sm">Telegram Alerts</Label>
+                        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                          <Switch checked={tgEnabled} onCheckedChange={setTgEnabled} data-testid="tg-enabled-switch" />
+                          <span className="text-xs text-slate-600">Enable alerts</span>
+                        </div>
+                        <div>
+                          <Label className="text-sm">Chat ID</Label>
+                          <Input data-testid="tg-chatid-input" placeholder="123456789" value={tgChatId} onChange={e=>setTgChatId(e.target.value)} />
+                        </div>
+                        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                          <div>
+                            <Label className="text-sm">Buy threshold</Label>
+                            <Input data-testid="tg-buy-input" type="number" min={0} max={100} value={tgBuy} onChange={e=>setTgBuy(parseInt(e.target.value||'80',10))} />
+                          </div>
+                          <div>
+                            <Label className="text-sm">Sell threshold</Label>
+                            <Input data-testid="tg-sell-input" type="number" min={0} max={100} value={tgSell} onChange={e=>setTgSell(parseInt(e.target.value||'60',10))} />
+                          </div>
+                        </div>
+                      </div>
                     </div>
                     <DialogFooter>
                       <Button onClick={saveProfile} className="btn-primary" data-testid="save-profile-button">Save</Button>
@@ -234,31 +328,34 @@ function Home() {
                 <Button variant="outline" onClick={handleLogout} data-testid="logout-button">Logout</Button>
               </div>
             ) : (
-              <Dialog open={authOpen} onOpenChange={setAuthOpen}>
-                <DialogTrigger asChild>
-                  <Button className="btn-primary" data-testid="open-login-button">Login / Signup</Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>{isSignup ? 'Create account' : 'Login'}</DialogTitle>
-                    <DialogDescription>Email/password auth. No keys are stored.</DialogDescription>
-                  </DialogHeader>
-                  <div className="grid" style={{ gap: 12 }}>
-                    <div>
-                      <Label className="text-sm">Email</Label>
-                      <Input data-testid="auth-email-input" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} placeholder="you@example.com" />
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <Button className="btn-primary" data-testid="google-login-button" onClick={openGoogleLogin}><LogIn size={14} style={{ marginRight:6 }} /> Continue with Google</Button>
+                <Dialog open={authOpen} onOpenChange={setAuthOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" data-testid="open-login-button">Login / Signup</Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>{isSignup ? 'Create account' : 'Login'}</DialogTitle>
+                      <DialogDescription>Email/password auth. No keys are stored.</DialogDescription>
+                    </DialogHeader>
+                    <div className="grid" style={{ gap: 12 }}>
+                      <div>
+                        <Label className="text-sm">Email</Label>
+                        <Input data-testid="auth-email-input" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} placeholder="you@example.com" />
+                      </div>
+                      <div>
+                        <Label className="text-sm">Password</Label>
+                        <Input data-testid="auth-password-input" type="password" value={authPassword} onChange={e=>setAuthPassword(e.target.value)} placeholder="••••••••" />
+                      </div>
+                      <div style={{ display:'flex', gap:8 }}>
+                        <Button onClick={handleAuth} className="btn-primary" data-testid="auth-submit-button">{isSignup ? 'Sign up' : 'Login'}</Button>
+                        <Button variant="outline" onClick={()=>setIsSignup(v=>!v)} data-testid="toggle-auth-mode">{isSignup ? 'Switch to Login' : 'Switch to Signup'}</Button>
+                      </div>
                     </div>
-                    <div>
-                      <Label className="text-sm">Password</Label>
-                      <Input data-testid="auth-password-input" type="password" value={authPassword} onChange={e=>setAuthPassword(e.target.value)} placeholder="••••••••" />
-                    </div>
-                    <div style={{ display:'flex', gap:8 }}>
-                      <Button onClick={handleAuth} className="btn-primary" data-testid="auth-submit-button">{isSignup ? 'Sign up' : 'Login'}</Button>
-                      <Button variant="outline" onClick={()=>setIsSignup(v=>!v)} data-testid="toggle-auth-mode">{isSignup ? 'Switch to Login' : 'Switch to Signup'}</Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
+                  </DialogContent>
+                </Dialog>
+              </div>
             )}
           </div>
         </div>
@@ -356,6 +453,8 @@ function Home() {
               const rec = recs[s];
               const loading = !!loadingMap[s];
               const action = rec?.action || 'hold';
+              const histKey = `${s}-${timeframe}`;
+              const historyItems = historyMap[histKey] || [];
               return (
                 <div key={s} className="card card-col-span-6">
                   <Card data-testid={`analysis-card-${s}`}>
@@ -363,31 +462,62 @@ function Home() {
                       <CardTitle className="card-title">{s}</CardTitle>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <span className={`badge ${action}`} data-testid={`action-badge-${s}`}>{formatAction(action)}</span>
+                        <Button data-testid={`remove-button-${s}`} variant="outline" onClick={() => removeFromWatchlist(s)}>Remove</Button>
                         <Button data-testid={`analyze-button-${s}`} className="btn-primary" onClick={() => analyze(s)} disabled={loading || !llmKey}>
                           {loading ? 'Analyzing…' : 'Analyze'}
                         </Button>
                       </div>
                     </CardHeader>
                     <CardContent>
-                      {rec ? (
-                        <div>
-                          <div className="text-sm text-slate-600" data-testid={`confidence-${s}`}>Confidence: {Math.round(rec.confidence)}%</div>
-                          <div className="text-sm text-slate-600" data-testid={`price-${s}`}>Price: {rec?.indicators_snapshot?.price ? rec.indicators_snapshot.price.toFixed(2) : '—'}</div>
-                          <div className="text-sm text-slate-600" data-testid={`rsi-${s}`}>RSI(14): {rec?.indicators_snapshot?.rsi_14 ? rec.indicators_snapshot.rsi_14.toFixed(2) : '—'}</div>
-                          <div className="text-sm text-slate-600" data-testid={`macd-${s}`}>MACD hist: {rec?.indicators_snapshot?.macd_hist ? rec.indicators_snapshot.macd_hist.toFixed(4) : '—'}</div>
-                          {rec.stop_loss && <div className="text-sm text-slate-600" data-testid={`stoploss-${s}`}>Stop-loss: {rec.stop_loss}</div>}
-                          {rec.take_profit && <div className="text-sm text-slate-600" data-testid={`takeprofit-${s}`}>Take-profit: {rec.take_profit}</div>}
-                          <ul className="mt-2" style={{ paddingLeft: 18 }}>
-                            {(rec.reasons || []).map((r, idx) => (
-                              <li key={idx} className="text-sm" data-testid={`reason-${s}-${idx}`}>• {r}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : (
-                        <div className="text-sm text-slate-500" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <AlertTriangle size={16} /> No analysis yet.
-                        </div>
-                      )}
+                      <Tabs value={activeTab} onValueChange={(v)=>{ setActiveTab(v); if (v==='history') fetchHistory(s); }}>
+                        <TabsList>
+                          <TabsTrigger value="current" data-testid={`tab-current-${s}`}>Current</TabsTrigger>
+                          <TabsTrigger value="history" data-testid={`tab-history-${s}`}>History</TabsTrigger>
+                        </TabsList>
+                        <TabsContent value="current">
+                          {rec ? (
+                            <div>
+                              <div className="text-sm text-slate-600" data-testid={`confidence-${s}`}>Confidence: {Math.round(rec.confidence)}%</div>
+                              <div className="text-sm text-slate-600" data-testid={`price-${s}`}>Price: {rec?.indicators_snapshot?.price ? rec.indicators_snapshot.price.toFixed(2) : '—'}</div>
+                              <div className="text-sm text-slate-600" data-testid={`rsi-${s}`}>RSI(14): {rec?.indicators_snapshot?.rsi_14 ? rec.indicators_snapshot.rsi_14.toFixed(2) : '—'}</div>
+                              <div className="text-sm text-slate-600" data-testid={`macd-${s}`}>MACD hist: {rec?.indicators_snapshot?.macd_hist ? rec.indicators_snapshot.macd_hist.toFixed(4) : '—'}</div>
+                              {rec.stop_loss && <div className="text-sm text-slate-600" data-testid={`stoploss-${s}`}>Stop-loss: {rec.stop_loss}</div>}
+                              {rec.take_profit && <div className="text-sm text-slate-600" data-testid={`takeprofit-${s}`}>Take-profit: {rec.take_profit}</div>}
+                              <ul className="mt-2" style={{ paddingLeft: 18 }}>
+                                {(rec.reasons || []).map((r, idx) => (
+                                  <li key={idx} className="text-sm" data-testid={`reason-${s}-${idx}`}>• {r}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : (
+                            <div className="text-sm text-slate-500" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <AlertTriangle size={16} /> No analysis yet.
+                            </div>
+                          )}
+                        </TabsContent>
+                        <TabsContent value="history">
+                          {isAuthed ? (
+                            <div className="text-sm text-slate-700" data-testid={`history-list-${s}`}>
+                              {historyItems.length === 0 ? (
+                                <div className="text-slate-500">No history yet.</div>
+                              ) : (
+                                <ul style={{ paddingLeft: 18 }}>
+                                  {historyItems.map((it, idx) => (
+                                    <li key={idx} style={{ marginBottom: 8 }}>
+                                      <div style={{ display:'flex', justifyContent:'space-between' }}>
+                                        <span>{new Date(it.created_at || it.recommendation?.generated_at || Date.now()).toLocaleString()}</span>
+                                        <span style={{ fontWeight:600 }}>{(it.recommendation?.action || '').toUpperCase()} • {Math.round(it.recommendation?.confidence ?? 0)}%</span>
+                                      </div>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-sm text-slate-500">Login to view history</div>
+                          )}
+                        </TabsContent>
+                      </Tabs>
                     </CardContent>
                   </Card>
                 </div>
@@ -396,7 +526,7 @@ function Home() {
           </div>
         </section>
 
-        <footer className="footer">Built for speed: Auth + Profile ready. Set your model/provider and session key to enable analysis. Live polling every 60s when enabled.</footer>
+        <footer className="footer">Built for speed: Google login + Profile + Telegram alerts + Watchlist persistence (server). Set your model/provider and session key to enable analysis.</footer>
       </main>
 
       <Toaster position="top-right" richColors />
