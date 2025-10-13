@@ -109,6 +109,10 @@ async def fetch_ohlcv(symbol: str, timeframe: str) -> pd.DataFrame:
 
 def compute_indicators(df: pd.DataFrame) -> Dict[str, Any]:
     close = df['Close']
+    # Ensure close is a 1D float Series
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+    close = pd.to_numeric(close, errors='coerce')
 
     # Simple Moving Averages
     sma_50 = close.rolling(window=50).mean()
