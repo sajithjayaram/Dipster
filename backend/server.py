@@ -16,7 +16,7 @@ import asyncio
 try:
     # OpenAI official SDK (2025) – Responses API
     from openai import AsyncOpenAI
-except Exception as e:  # pragma: no cover
+except Exception:  # pragma: no cover
     AsyncOpenAI = None  # Will validate at runtime
 
 import pandas as pd
