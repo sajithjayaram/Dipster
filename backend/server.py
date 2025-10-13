@@ -132,14 +132,26 @@ def compute_indicators(df: pd.DataFrame) -> Dict[str, Any]:
 
     # Last row snapshot
     last = df.index[-1]
+    # Use iloc to avoid potential ambiguity with index
+    v_close = close.iloc[-1]
+    v50 = sma_50.iloc[-1]
+    v200 = sma_200.iloc[-1]
+    v_rsi = rsi.iloc[-1]
+    v_macd = macd_line.iloc[-1]
+    v_sig = macd_signal.iloc[-1]
+    v_hist = macd_hist.iloc[-1]
+
+    def _num(x):
+        return None if pd.isna(x) else float(x)
+
     snapshot = {
-        'price': float(close.loc[last]),
-        'sma_50': float(sma_50.loc[last]) if not np.isnan(sma_50.loc[last]) else None,
-        'sma_200': float(sma_200.loc[last]) if not np.isnan(sma_200.loc[last]) else None,
-        'rsi_14': float(rsi.loc[last]) if not np.isnan(rsi.loc[last]) else None,
-        'macd': float(macd_line.loc[last]) if not np.isnan(macd_line.loc[last]) else None,
-        'macd_signal': float(macd_signal.loc[last]) if not np.isnan(macd_signal.loc[last]) else None,
-        'macd_hist': float(macd_hist.loc[last]) if not np.isnan(macd_hist.loc[last]) else None,
+        'price': _num(v_close),
+        'sma_50': _num(v50),
+        'sma_200': _num(v200),
+        'rsi_14': _num(v_rsi),
+        'macd': _num(v_macd),
+        'macd_signal': _num(v_sig),
+        'macd_hist': _num(v_hist),
         'date': last.isoformat() if hasattr(last, 'isoformat') else str(last)
     }
 
