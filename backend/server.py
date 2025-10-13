@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import APIRouter
 
