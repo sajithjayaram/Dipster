@@ -146,7 +146,15 @@ def compute_indicators(df: pd.DataFrame) -> Dict[str, Any]:
     v_hist = macd_hist.iloc[-1]
 
     def _num(x):
-        return None if pd.isna(x) else float(x)
+        try:
+            if isinstance(x, (pd.Series, pd.DataFrame)):
+                # Reduce to scalar
+                x = x.iloc[-1] if hasattr(x, 'iloc') else x.squeeze()
+            if pd.isna(x):
+                return None
+            return float(x)
+        except Exception:
+            return None
 
     snapshot = {
         'price': _num(v_close),
