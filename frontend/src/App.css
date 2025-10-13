@@ -1,34 +1,59 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* Global app styles tailored for a clean fintech UI (light by default) */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+:root {
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --ink: #0f172a;
+  --muted: #6b7280;
+  --teal: #0ea5a4;
+  --teal-700: #0f766e;
+  --ring: rgba(14,165,164,0.25);
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
+body { font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans, sans-serif; background: var(--bg); color: var(--ink); }
+
+.app-shell { min-height: 100vh; display: flex; flex-direction: column; }
+
+.header {
+  position: sticky; top: 0; z-index: 30;
+  backdrop-filter: saturate(140%) blur(10px);
+  background: rgba(255,255,255,0.7);
+  border-bottom: 1px solid rgba(2,6,23,0.06);
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+.container { max-width: 1100px; margin: 0 auto; padding: 24px; }
+
+.hero {
+  display: grid; grid-template-columns: 1.2fr 1fr; gap: 32px; align-items: center; padding: 24px 0 8px;
 }
 
-.App-link {
-    color: #61dafb;
-}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-title { font-weight: 700; letter-spacing: -0.02em; }
+.brand-badge { color: #0ea5a4; font-weight: 600; border: 1px solid rgba(14,165,164,0.3); padding: 2px 8px; border-radius: 999px; }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
-}
+.panel { background: var(--card); border: 1px solid rgba(2,6,23,0.06); border-radius: 16px; box-shadow: 0 10px 30px rgba(2,6,23,0.06); }
+
+/* interactions */
+.btn-primary { background: var(--teal); color: white; border-radius: 999px; padding: 10px 16px; font-weight: 600; }
+.btn-primary:hover { background: var(--teal-700); }
+
+.input { border: 1px solid rgba(2,6,23,0.12); border-radius: 12px; padding: 10px 12px; outline: none; }
+.input:focus { border-color: var(--teal); box-shadow: 0 0 0 4px var(--ring); }
+
+.card { padding: 16px; border-radius: 16px; border: 1px solid rgba(2,6,23,0.06); background: #fff; }
+.card-title { font-weight: 700; }
+.card-grid { display: grid; gap: 16px; grid-template-columns: repeat(12, 1fr); }
+.card-col-span-6 { grid-column: span 6 / span 6; }
+.card-col-span-12 { grid-column: span 12 / span 12; }
+
+.badge { border-radius: 999px; padding: 4px 10px; font-weight: 600; }
+.badge.buy { background: rgba(34,197,94,0.12); color: #065f46; border: 1px solid rgba(34,197,94,0.25); }
+.badge.sell { background: rgba(239,68,68,0.12); color: #7f1d1d; border: 1px solid rgba(239,68,68,0.25); }
+.badge.hold { background: rgba(234,179,8,0.12); color: #78350f; border: 1px solid rgba(234,179,8,0.25); }
+
+.list { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip { background: #f1f5f9; border: 1px solid rgba(2,6,23,0.06); border-radius: 999px; padding: 6px 10px; font-weight: 600; color: #334155; cursor: pointer; }
+.chip:hover { border-color: var(--teal); color: var(--teal-700); }
+
+.footer { padding: 40px 0; color: var(--muted); font-size: 14px; }

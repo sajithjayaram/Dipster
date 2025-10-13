@@ -1,74 +1,41 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, HTTPException, Query
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Literal, Optional, Dict, Any
+from datetime import datetime, timezone
 import os
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
 import uuid
-from datetime import datetime, timezone
 
+# Third-party services
+import asyncio
+
+try:
+    # OpenAI official SDK (2025) – Responses API
+    from openai import AsyncOpenAI
+except Exception as e:  # pragma: no cover
+    AsyncOpenAI = None  # Will validate at runtime
+
+import pandas as pd
+import numpy as np
+import yfinance as yf
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
+# MongoDB connection (available for future features like alert persistence)
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+db = client[os.environ.get('DB_NAME', 'test_database')]
 
-# Create the main app without a prefix
-app = FastAPI()
-
-# Create a router with the /api prefix
+# FastAPI app and router (/api prefix is mandatory for ingress)
+app = FastAPI(title="AI Trading Agent API", version="0.1.0")
 api_router = APIRouter(prefix="/api")
 
-
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-class StatusCheckCreate(BaseModel):
-    client_name: str
-
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
-async def root():
-    return {"message": "Hello World"}
-
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
-
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
-
-# Include the router in the main app
-app.include_router(api_router)
-
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -78,11 +45,245 @@ app.add_middleware(
 )
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("trading-ai")
+
+# --------------- Models ---------------
+class StatusCheck(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_name: str
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class StatusCheckCreate(BaseModel):
+    client_name: str
+
+class AnalyzeRequest(BaseModel):
+    symbol: str = Field(..., description="Ticker symbol (e.g., RELIANCE.NS, TCS.NS, INFY.NS)")
+    timeframe: Literal['weekly', 'daily', 'intraday'] = Field('weekly', description="Analysis timeframe")
+    market: Literal['IN', 'US', 'OTHER'] = Field('IN', description="Market/region hint")
+
+class AIRecommendation(BaseModel):
+    symbol: str
+    timeframe: str
+    action: Literal['buy', 'sell', 'hold']
+    confidence: float = Field(ge=0, le=100)
+    reasons: List[str]
+    indicators_snapshot: Dict[str, Any]
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# --------------- Utilities ---------------
+
+def _safely_get_env(name: str) -> str:
+    val = os.environ.get(name)
+    if not val:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return val
+
+async def fetch_ohlcv(symbol: str, timeframe: str) -> pd.DataFrame:
+    # Use Yahoo Finance via yfinance
+    # Map timeframe to yfinance interval
+    if timeframe == 'weekly':
+        interval = '1wk'
+        period = '5y'
+    elif timeframe == 'daily':
+        interval = '1d'
+        period = '2y'
+    else:
+        # intraday – use 60m for broader coverage
+        interval = '60m'
+        period = '60d'
+
+    try:
+        data = yf.download(symbol, period=period, interval=interval, auto_adjust=True, progress=False)
+        if data is None or data.empty:
+            raise ValueError("No data returned from Yahoo Finance")
+        data = data.dropna().rename(columns=str.title)  # Ensure 'Close', 'Open', etc.
+        return data
+    except Exception as e:
+        logger.exception("Failed to fetch data for %s", symbol)
+        raise HTTPException(status_code=400, detail=f"Failed to fetch market data: {e}")
+
+
+def compute_indicators(df: pd.DataFrame) -> Dict[str, Any]:
+    close = df['Close']
+
+    # Simple Moving Averages
+    sma_50 = close.rolling(window=50).mean()
+    sma_200 = close.rolling(window=200).mean()
+
+    # RSI (14)
+    delta = close.diff()
+    up = np.where(delta > 0, delta, 0.0)
+    down = np.where(delta < 0, -delta, 0.0)
+    roll_up = pd.Series(up, index=close.index).rolling(14).mean()
+    roll_down = pd.Series(down, index=close.index).rolling(14).mean()
+    rs = roll_up / (roll_down.replace(0, np.nan))
+    rsi = 100 - (100 / (1 + rs))
+
+    # MACD (12,26,9)
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    macd_line = ema12 - ema26
+    macd_signal = macd_line.ewm(span=9, adjust=False).mean()
+    macd_hist = macd_line - macd_signal
+
+    # Last row snapshot
+    last = df.index[-1]
+    snapshot = {
+        'price': float(close.loc[last]),
+        'sma_50': float(sma_50.loc[last]) if not np.isnan(sma_50.loc[last]) else None,
+        'sma_200': float(sma_200.loc[last]) if not np.isnan(sma_200.loc[last]) else None,
+        'rsi_14': float(rsi.loc[last]) if not np.isnan(rsi.loc[last]) else None,
+        'macd': float(macd_line.loc[last]) if not np.isnan(macd_line.loc[last]) else None,
+        'macd_signal': float(macd_signal.loc[last]) if not np.isnan(macd_signal.loc[last]) else None,
+        'macd_hist': float(macd_hist.loc[last]) if not np.isnan(macd_hist.loc[last]) else None,
+        'date': last.isoformat() if hasattr(last, 'isoformat') else str(last)
+    }
+
+    # Simple heuristics for a baseline signal (used for guardrail/fallback)
+    heur_action = 'hold'
+    reasons = []
+    if snapshot['rsi_14'] is not None:
+        if snapshot['rsi_14'] < 30:
+            reasons.append("RSI indicates oversold (<30)")
+            heur_action = 'buy'
+        elif snapshot['rsi_14'] > 70:
+            reasons.append("RSI indicates overbought (>70)")
+            heur_action = 'sell'
+    if snapshot['sma_50'] and snapshot['sma_200']:
+        if snapshot['sma_50'] > snapshot['sma_200']:
+            reasons.append("SMA50 above SMA200 (uptrend)")
+            if heur_action == 'hold':
+                heur_action = 'buy'
+        elif snapshot['sma_50'] < snapshot['sma_200']:
+            reasons.append("SMA50 below SMA200 (downtrend)")
+            if heur_action == 'hold':
+                heur_action = 'sell'
+    if snapshot['macd_hist'] is not None:
+        if snapshot['macd_hist'] > 0:
+            reasons.append("MACD histogram positive")
+        else:
+            reasons.append("MACD histogram negative")
+
+    return {
+        'snapshot': snapshot,
+        'baseline_signal': heur_action,
+        'baseline_reasons': reasons,
+    }
+
+
+async def call_openai_recommendation(symbol: str, timeframe: str, indicators: Dict[str, Any]) -> AIRecommendation:
+    if AsyncOpenAI is None:
+        raise HTTPException(status_code=500, detail="OpenAI SDK not available on server")
+
+    api_key = _safely_get_env('OPENAI_API_KEY')
+    client_oa = AsyncOpenAI(api_key=api_key)
+
+    # Use Responses API with structured output
+    system_instruction = (
+        "You are a cautious, senior trading analyst. Analyze provided technical indicators to produce a single, actionable recommendation "
+        "for the specified timeframe. Prefer conservative, risk-aware guidance. Keep output concise."
+    )
+
+    user_content = (
+        f"Symbol: {symbol}\nTimeframe: {timeframe}\n"
+        f"Indicators (latest snapshot): {indicators['snapshot']}\n"
+        f"Baseline signal (heuristic): {indicators['baseline_signal']} | reasons: {indicators['baseline_reasons']}\n"
+        "Return only the structured recommendation."
+    )
+
+    # Guard for long requests – enforce timeout
+    try:
+        # New Structured Outputs via responses.parse
+        resp = await asyncio.wait_for(
+            client_oa.responses.parse(
+                model=os.environ.get('OPENAI_MODEL', 'gpt-5-mini'),
+                input=[
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": user_content},
+                ],
+                # Map to our Pydantic model
+                text_format=AIRecommendation,
+                reasoning={"effort": os.environ.get('OPENAI_REASONING', 'low')},
+                max_output_tokens=int(os.environ.get('OPENAI_MAX_TOKENS', '350')),
+                temperature=float(os.environ.get('OPENAI_TEMPERATURE', '0.1')),
+                verbosity=os.environ.get('OPENAI_VERBOSITY', 'low'),
+            ),
+            timeout=float(os.environ.get('OPENAI_TIMEOUT_SECONDS', '30')),
+        )
+        parsed: AIRecommendation = resp.output_parsed
+        return parsed
+    except asyncio.TimeoutError:
+        logger.error("OpenAI request timed out for %s", symbol)
+        raise HTTPException(status_code=504, detail="AI analysis timed out. Please retry.")
+    except Exception as e:
+        logger.exception("OpenAI parse failed, falling back to heuristic: %s", e)
+        # Fallback to baseline heuristics into our schema
+        snap = indicators['snapshot']
+        return AIRecommendation(
+            symbol=symbol,
+            timeframe=timeframe,
+            action=indicators['baseline_signal'],
+            confidence=60.0,
+            reasons=["AI unavailable. Using baseline technical heuristics."] + indicators['baseline_reasons'],
+            indicators_snapshot=snap,
+            stop_loss=round(snap['price'] * (0.95 if indicators['baseline_signal'] == 'buy' else 1.05), 2) if snap.get('price') else None,
+            take_profit=round(snap['price'] * (1.08 if indicators['baseline_signal'] == 'buy' else 0.92), 2) if snap.get('price') else None,
+        )
+
+# --------------- Routes ---------------
+
+@api_router.get("/")
+async def root():
+    return {"message": "Trading AI backend is up"}
+
+@api_router.post("/status", response_model=StatusCheck)
+async def create_status_check(input: StatusCheckCreate):
+    status_obj = StatusCheck(client_name=input.client_name)
+    doc = status_obj.model_dump()
+    doc['timestamp'] = doc['timestamp'].isoformat()
+    await db.status_checks.insert_one(doc)
+    return status_obj
+
+@api_router.get("/status", response_model=List[StatusCheck])
+async def get_status_checks():
+    items = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
+    for it in items:
+        if isinstance(it.get('timestamp'), str):
+            it['timestamp'] = datetime.fromisoformat(it['timestamp'])
+    return items
+
+@api_router.post("/analyze", response_model=AIRecommendation)
+async def analyze(req: AnalyzeRequest):
+    # Normalize Indian NSE symbols: user might omit ".NS"; do not over-assume – leave as given
+    symbol = req.symbol.strip()
+    # Fetch OHLCV and compute indicators
+    df = await fetch_ohlcv(symbol, req.timeframe)
+    indicators = compute_indicators(df)
+    # Ensure we have enough data (SMA200 requires >= 200 periods)
+    if len(df) < 210 and req.timeframe in ("daily", "weekly"):
+        logger.info("Limited history for %s: %d rows", symbol, len(df))
+    # Call OpenAI for AI-enhanced recommendation
+    rec = await call_openai_recommendation(symbol, req.timeframe, indicators)
+    # enrich with snapshot (parse may already include, but ensure)
+    if not rec.indicators_snapshot:
+        rec.indicators_snapshot = indicators['snapshot']
+    return rec
+
+@api_router.get("/signal/current", response_model=AIRecommendation)
+async def current_signal(symbol: str = Query(..., description="Ticker symbol"), timeframe: Literal['weekly','daily','intraday'] = 'weekly'):
+    df = await fetch_ohlcv(symbol.strip(), timeframe)
+    indicators = compute_indicators(df)
+    rec = await call_openai_recommendation(symbol.strip(), timeframe, indicators)
+    if not rec.indicators_snapshot:
+        rec.indicators_snapshot = indicators['snapshot']
+    return rec
+
+# Mount router
+app.include_router(api_router)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
