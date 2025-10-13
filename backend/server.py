@@ -27,6 +27,7 @@ import json
 # Auth deps
 from passlib.context import CryptContext
 from jose import jwt, JWTError
+from starlette.responses import RedirectResponse, JSONResponse
 
 # Optional providers
 try:
@@ -47,7 +48,7 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ.get('DB_NAME', 'test_database')]
 
 # App & Router
-app = FastAPI(title="AI Trading Agent API", version="0.4.0")
+app = FastAPI(title="AI Trading Agent API", version="0.5.0")
 api_router = APIRouter(prefix="/api")
 
 # CORS
@@ -68,6 +69,12 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-not-for-prod")
 JWT_ALGO = os.environ.get("JWT_ALGO", "HS256")
 JWT_EXPIRE_MIN = int(os.environ.get("JWT_EXPIRE_MIN", "10080"))  # 7 days
+
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI")  # e.g., https://<domain>/api/auth/google/callback
+
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
 # ---------------- Models ----------------
 class StatusCheck(BaseModel):
@@ -129,6 +136,12 @@ class UserOut(BaseModel):
 # Portfolio models
 class WatchlistUpdate(BaseModel):
     symbols: List[str]
+
+class TelegramConfig(BaseModel):
+    chat_id: str
+    enabled: bool = True
+    buy_threshold: int = 80
+    sell_threshold: int = 60
 
 # ---------------- Helpers ----------------
 
@@ -237,29 +250,32 @@ def compute_indicators(df: pd.DataFrame) -> Dict[str, Any]:
 
     heur_action = 'hold'
     reasons = []
+    score = 50.0
     if snapshot['rsi_14'] is not None:
         if snapshot['rsi_14'] < 30:
             reasons.append("RSI indicates oversold (<30)")
-            heur_action = 'buy'
+            heur_action = 'buy'; score += 15
         elif snapshot['rsi_14'] > 70:
             reasons.append("RSI indicates overbought (>70)")
-            heur_action = 'sell'
+            heur_action = 'sell'; score -= 15
     if snapshot['sma_50'] and snapshot['sma_200']:
         if snapshot['sma_50'] > snapshot['sma_200']:
             reasons.append("SMA50 above SMA200 (uptrend)")
-            if heur_action == 'hold':
-                heur_action = 'buy'
+            if heur_action == 'hold': heur_action = 'buy'
+            score += 20
         elif snapshot['sma_50'] < snapshot['sma_200']:
             reasons.append("SMA50 below SMA200 (downtrend)")
-            if heur_action == 'hold':
-                heur_action = 'sell'
+            if heur_action == 'hold': heur_action = 'sell'
+            score -= 20
     if snapshot['macd_hist'] is not None:
         if snapshot['macd_hist'] > 0:
-            reasons.append("MACD histogram positive")
+            reasons.append("MACD histogram positive"); score += 10
         else:
-            reasons.append("MACD histogram negative")
+            reasons.append("MACD histogram negative"); score -= 10
 
-    return {'snapshot': snapshot, 'baseline_signal': heur_action, 'baseline_reasons': reasons}
+    score = max(0.0, min(100.0, score))
+
+    return {'snapshot': snapshot, 'baseline_signal': heur_action, 'baseline_reasons': reasons, 'baseline_confidence': score}
 
 # ---------------- LLM Calls ----------------
 async def call_openai(symbol: str, timeframe: str, indicators: Dict[str, Any], api_key: str, model: str) -> AIRecommendation:
@@ -298,7 +314,7 @@ async def call_openai(symbol: str, timeframe: str, indicators: Dict[str, Any], a
     except Exception as e:
         logger.exception("OpenAI parse failed, fallback: %s", e)
         snap = indicators['snapshot']
-        return AIRecommendation(symbol=symbol, timeframe=timeframe, action=indicators['baseline_signal'], confidence=60.0,
+        return AIRecommendation(symbol=symbol, timeframe=timeframe, action=indicators['baseline_signal'], confidence=indicators.get('baseline_confidence', 60.0),
                                 reasons=["AI unavailable. Using baseline technical heuristics."] + indicators['baseline_reasons'],
                                 indicators_snapshot=snap,
                                 stop_loss=round(snap['price'] * (0.95 if indicators['baseline_signal'] == 'buy' else 1.05), 2) if snap.get('price') else None,
@@ -322,7 +338,6 @@ async def call_anthropic(symbol: str, timeframe: str, indicators: Dict[str, Any]
             system=system_instruction,
             messages=[{"role": "user", "content": prompt}],
         )
-        # Extract text
         text_parts = [c.text for c in msg.content if getattr(c, 'type', '') == 'text']
         text = "".join(text_parts) if text_parts else ""
         try:
@@ -337,7 +352,7 @@ async def call_anthropic(symbol: str, timeframe: str, indicators: Dict[str, Any]
     except Exception as e:
         logger.exception("Anthropic failed, fallback: %s", e)
         snap = indicators['snapshot']
-        return AIRecommendation(symbol=symbol, timeframe=timeframe, action=indicators['baseline_signal'], confidence=60.0,
+        return AIRecommendation(symbol=symbol, timeframe=timeframe, action=indicators['baseline_signal'], confidence=indicators.get('baseline_confidence', 60.0),
                                 reasons=["AI unavailable. Using baseline technical heuristics."] + indicators['baseline_reasons'],
                                 indicators_snapshot=snap,
                                 stop_loss=round(snap['price'] * (0.95 if indicators['baseline_signal'] == 'buy' else 1.05), 2) if snap.get('price') else None,
@@ -370,7 +385,7 @@ async def call_gemini(symbol: str, timeframe: str, indicators: Dict[str, Any], a
     except Exception as e:
         logger.exception("Gemini failed, fallback: %s", e)
         snap = indicators['snapshot']
-        return AIRecommendation(symbol=symbol, timeframe=timeframe, action=indicators['baseline_signal'], confidence=60.0,
+        return AIRecommendation(symbol=symbol, timeframe=timeframe, action=indicators['baseline_signal'], confidence=indicators.get('baseline_confidence', 60.0),
                                 reasons=["AI unavailable. Using baseline technical heuristics."] + indicators['baseline_reasons'],
                                 indicators_snapshot=snap,
                                 stop_loss=round(snap['price'] * (0.95 if indicators['baseline_signal'] == 'buy' else 1.05), 2) if snap.get('price') else None,
@@ -393,7 +408,7 @@ async def call_llm(provider: str, model: Optional[str], api_key: str, symbol: st
 async def root():
     return {"message": "Trading AI backend is up"}
 
-# Auth
+# Auth (email/password)
 @api_router.post("/auth/signup", response_model=TokenResponse)
 async def signup(req: SignupRequest):
     if len(req.password) < 8:
@@ -408,6 +423,7 @@ async def signup(req: SignupRequest):
         "created_at": datetime.now(timezone.utc).isoformat(),
         "profile": {"provider": "openai", "model": os.environ.get('OPENAI_MODEL', 'gpt-5-mini')},
         "watchlist": ["RELIANCE.NS", "TCS.NS", "INFY.NS"],
+        "alert_settings": {"enabled": False, "buy_threshold": 80, "sell_threshold": 60},
     }
     await db.users.insert_one(user)
     token = create_token(user['id'], user['email'])
@@ -424,6 +440,72 @@ async def login(req: LoginRequest):
 @api_router.get("/auth/me", response_model=UserOut)
 async def me(current=Depends(get_current_user)):
     return UserOut(id=current['id'], email=current['email'], profile=Profile(**current.get('profile', {})))
+
+# Google OAuth
+@api_router.get("/auth/google/login")
+async def google_login():
+    if not GOOGLE_CLIENT_ID or not GOOGLE_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="google_oauth_not_configured")
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "online",
+        "prompt": "consent",
+    }
+    from urllib.parse import urlencode
+    url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+    return RedirectResponse(url)
+
+@api_router.get("/auth/google/callback")
+async def google_callback(code: Optional[str] = None):
+    if not code:
+        return JSONResponse({"error": "missing_code"}, status_code=400)
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET or not GOOGLE_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="google_oauth_not_configured")
+    # Exchange code
+    token_data = {
+        "code": code,
+        "client_id": GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "grant_type": "authorization_code",
+    }
+    async with httpx.AsyncClient(timeout=15) as hx:
+        tr = await hx.post("https://oauth2.googleapis.com/token", data=token_data)
+        if tr.status_code != 200:
+            return JSONResponse({"error": "token_exchange_failed"}, status_code=400)
+        token_json = tr.json()
+        access_token = token_json.get("access_token")
+        if not access_token:
+            return JSONResponse({"error": "no_access_token"}, status_code=400)
+        ur = await hx.get("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {access_token}"})
+        if ur.status_code != 200:
+            return JSONResponse({"error": "userinfo_failed"}, status_code=400)
+        userinfo = ur.json()
+    email = userinfo.get("email")
+    if not email:
+        return JSONResponse({"error": "email_not_found"}, status_code=400)
+    # Upsert user
+    existing = await db.users.find_one({"email": email})
+    if not existing:
+        user = {
+            "id": str(uuid.uuid4()),
+            "email": email,
+            "password_hash": "",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "profile": {"provider": "openai", "model": os.environ.get('OPENAI_MODEL', 'gpt-5-mini')},
+            "watchlist": ["RELIANCE.NS", "TCS.NS", "INFY.NS"],
+            "alert_settings": {"enabled": False, "buy_threshold": 80, "sell_threshold": 60},
+        }
+        await db.users.insert_one(user)
+        uid = user['id']
+    else:
+        uid = existing['id']
+    token = create_token(uid, email)
+    # Redirect to frontend root with token in query
+    return RedirectResponse(url=f"/\u003Ftoken={token}")
 
 # Profile
 @api_router.get("/profile", response_model=Profile)
@@ -444,6 +526,18 @@ async def get_watchlist(current=Depends(get_current_user)):
 @api_router.put("/portfolio/watchlist")
 async def put_watchlist(payload: WatchlistUpdate, current=Depends(get_current_user)):
     await db.users.update_one({"id": current['id']}, {"$set": {"watchlist": payload.symbols}})
+    return {"ok": True}
+
+# Analysis history
+@api_router.get("/portfolio/history")
+async def history(symbol: str, timeframe: str = 'weekly', limit: int = 20, current=Depends(get_current_user)):
+    cursor = db.analysis_history.find({"user_id": current['id'], "symbol": symbol, "timeframe": timeframe}, {"_id": 0}).sort("created_at", -1).limit(limit)
+    return {"items": await cursor.to_list(length=limit)}
+
+# Telegram alerts config
+@api_router.post("/alerts/telegram/config")
+async def set_telegram(cfg: TelegramConfig, current=Depends(get_current_user)):
+    await db.users.update_one({"id": current['id']}, {"$set": {"telegram_chat_id": cfg.chat_id, "alert_settings": {"enabled": cfg.enabled, "buy_threshold": cfg.buy_threshold, "sell_threshold": cfg.sell_threshold}}})
     return {"ok": True}
 
 # Search with offline fallback
@@ -499,15 +593,34 @@ async def search_symbols(q: str = Query(..., min_length=2), region: str = Query(
 # Analysis
 @api_router.post("/analyze", response_model=AIRecommendation)
 async def analyze(req: AnalyzeRequest,
+                  request: Request,
                   llm_key: Optional[str] = Header(default=None, alias='X-LLM-KEY'),
                   llm_provider: Optional[str] = Header(default='openai', alias='X-LLM-PROVIDER'),
                   llm_model: Optional[str] = Header(default=None, alias='X-LLM-MODEL')):
     symbol = req.symbol.strip()
     df = await fetch_ohlcv(symbol, req.timeframe)
     indicators = compute_indicators(df)
+    # Prefer user-provided model if headers present; otherwise fallback to baseline heuristics
     rec = await call_llm(llm_provider, llm_model, llm_key, symbol, req.timeframe, indicators)
     if not rec.indicators_snapshot:
         rec.indicators_snapshot = indicators['snapshot']
+    # Save history if user is authenticated
+    auth = request.headers.get('Authorization')
+    if auth and auth.lower().startswith('bearer '):
+        try:
+            payload = jwt.decode(auth.split(' ',1)[1], JWT_SECRET, algorithms=[JWT_ALGO])
+            uid = payload.get('sub')
+            if uid:
+                doc = {
+                    "user_id": uid,
+                    "symbol": rec.symbol,
+                    "timeframe": rec.timeframe,
+                    "recommendation": rec.model_dump(),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+                await db.analysis_history.insert_one(doc)
+        except Exception:
+            pass
     return rec
 
 @api_router.get("/signal/current", response_model=AIRecommendation)
@@ -524,6 +637,53 @@ async def current_signal(symbol: str = Query(...), timeframe: Literal['weekly','
 
 # Include router
 app.include_router(api_router)
+
+# ---------------- Alerts background (heuristics-based) ----------------
+async def alerts_loop():
+    if not TELEGRAM_BOT_TOKEN:
+        logger.info("Telegram bot token not configured; alerts disabled")
+        return
+    send_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    while True:
+        try:
+            users = db.users.find({"alert_settings.enabled": True, "telegram_chat_id": {"$exists": True}})
+            async for u in users:
+                chat_id = u.get('telegram_chat_id')
+                settings = u.get('alert_settings', {})
+                buy_th = int(settings.get('buy_threshold', 80))
+                sell_th = int(settings.get('sell_threshold', 60))
+                watch = u.get('watchlist', [])[:20]  # cap
+                for sym in watch:
+                    try:
+                        df = await fetch_ohlcv(sym, 'weekly')
+                        indicators = compute_indicators(df)
+                        conf = indicators.get('baseline_confidence', 60)
+                        action = indicators.get('baseline_signal', 'hold')
+                        # thresholds
+                        trigger = (action == 'buy' and conf >= buy_th) or (action == 'sell' and conf >= sell_th)
+                        if not trigger:
+                            continue
+                        # dedupe using last_alerts
+                        last_map = u.get('last_alerts', {})
+                        key = f"{sym}_weekly"
+                        last_entry = last_map.get(key)
+                        if last_entry and last_entry.get('action') == action and (datetime.now(timezone.utc).timestamp() - last_entry.get('ts', 0)) < 3600:
+                            continue
+                        text = f"Signal {action.upper()} for {sym} (weekly)\nConfidence: {conf}%\nReason: {'; '.join(indicators.get('baseline_reasons', [])[:3])}"
+                        async with httpx.AsyncClient(timeout=10) as hx:
+                            await hx.post(send_url, json={"chat_id": chat_id, "text": text})
+                        # update last_alerts
+                        last_map[key] = {"action": action, "ts": datetime.now(timezone.utc).timestamp()}
+                        await db.users.update_one({"id": u['id']}, {"$set": {"last_alerts": last_map}})
+                    except Exception:
+                        continue
+        except Exception as e:
+            logger.exception("alerts loop error: %s", e)
+        await asyncio.sleep(300)  # 5 minutes
+
+@app.on_event("startup")
+async def start_alerts():
+    asyncio.create_task(alerts_loop())
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
