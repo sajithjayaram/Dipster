@@ -114,13 +114,13 @@ def compute_indicators(df: pd.DataFrame) -> Dict[str, Any]:
     sma_50 = close.rolling(window=50).mean()
     sma_200 = close.rolling(window=200).mean()
 
-    # RSI (14)
+    # RSI (14) – pure pandas to avoid ndarray shape issues
     delta = close.diff()
-    up = np.where(delta > 0, delta, 0.0)
-    down = np.where(delta < 0, -delta, 0.0)
-    roll_up = pd.Series(up, index=close.index).rolling(14).mean()
-    roll_down = pd.Series(down, index=close.index).rolling(14).mean()
-    rs = roll_up / (roll_down.replace(0, np.nan))
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    roll_up = gain.rolling(14).mean()
+    roll_down = loss.rolling(14).mean()
+    rs = roll_up / roll_down.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
 
     # MACD (12,26,9)
