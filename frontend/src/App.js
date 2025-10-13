@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import axios from 'axios';
 import { Toaster, toast } from './components/ui/sonner.jsx';
@@ -7,10 +7,10 @@ import { Input } from './components/ui/input.jsx';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card.jsx';
 import { Label } from './components/ui/label.jsx';
 import { Switch } from './components/ui/switch.jsx';
-import { Badge } from './components/ui/badge.jsx';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from './components/ui/select.jsx';
 import { Separator } from './components/ui/separator.jsx';
-import { BarChart3, Activity, AlertTriangle } from 'lucide-react';
+import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from './components/ui/command.jsx';
+import { BarChart3, Activity, AlertTriangle, Search } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -38,13 +38,23 @@ function Home() {
   const [loadingMap, setLoadingMap] = useState({});
   const [recs, setRecs] = useState({});
 
-  const addSymbol = () => {
-    const s = newSymbol.trim().toUpperCase();
-    if (!s) return; 
-    if (symbols.includes(s)) { toast.info('Already on watchlist'); return; }
-    setSymbols(prev => [s, ...prev]);
+  // search state
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [openSearch, setOpenSearch] = useState(false);
+  const searchBoxRef = useRef(null);
+  const debounceRef = useRef(null);
+
+  const addToWatchlist = (s) => {
+    const S = s.trim().toUpperCase();
+    if (!S) return;
+    if (symbols.includes(S)) { toast.info('Already on watchlist'); return; }
+    setSymbols(prev => [S, ...prev]);
     setNewSymbol('');
-    toast.success(`${s} added`);
+    setQuery('');
+    setResults([]);
+    setOpenSearch(false);
+    toast.success(`${S} added`);
   };
 
   const removeSymbol = (s) => {
@@ -70,22 +80,30 @@ function Home() {
     try {
       const res = await axios.get(`${API}/signal/current`, { params: { symbol: s, timeframe } });
       setRecs(prev => ({ ...prev, [s]: res.data }));
-    } catch (e) {
-      /* silent */
-    }
+    } catch (e) { /* silent */ }
   };
 
-  const startPoll = useMemo(() => () => {
-    symbols.forEach(s => pollOne(s));
-  }, [symbols, timeframe]);
-
+  const startPoll = useMemo(() => () => { symbols.forEach(s => pollOne(s)); }, [symbols, timeframe]);
   usePolling(live, startPoll, 60000);
 
   useEffect(() => {
-    // Initial fetch once
+    // Initial fetch for defaults
     symbols.forEach(s => analyze(s));
-    // note: intentionally not including analyze in deps to avoid re-runs
+    // intentionally not including analyze in deps to avoid re-runs on every render
   }, []);
+
+  // search fetcher with debounce
+  const fetchSearch = useCallback((q) => {
+    if (!q || q.length < 2) { setResults([]); return; }
+    axios.get(`${API}/search`, { params: { q, region: market } })
+      .then(res => setResults(res.data?.results || []))
+      .catch(() => setResults([]));
+  }, [market]);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchSearch(query), 250);
+  }, [query, fetchSearch]);
 
   return (
     <div className="app-shell">
@@ -94,7 +112,7 @@ function Home() {
           <div className="brand">
             <BarChart3 size={22} color="#0ea5a4" />
             <div className="brand-title" style={{ fontSize: 18 }}>TradeSense AI</div>
-            <span className="brand-badge" data-testid="brand-badge">Weekly • India</span>
+            <span className="brand-badge" data-testid="brand-badge">{timeframe === 'weekly' ? 'Weekly' : timeframe === 'daily' ? 'Daily' : 'Intraday'} • {market === 'IN' ? 'India' : market === 'US' ? 'US' : 'Other'}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <Label htmlFor="live-switch" className="text-sm">Live alerts</Label>
@@ -111,12 +129,37 @@ function Home() {
               Track stocks, mutual funds and commodities. Get weekly recommendations with clear reasoning. Data powered by Yahoo Finance.
             </p>
             <div className="panel" style={{ padding: 16, marginTop: 16 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 160px 140px 120px', gap: 12 }}>
-                <div>
-                  <Label htmlFor="symbol" className="text-sm">Add symbol (e.g., RELIANCE.NS)</Label>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                    <Input data-testid="symbol-input" id="symbol" placeholder="RELIANCE.NS" value={newSymbol} onChange={e => setNewSymbol(e.target.value)} />
-                    <Button data-testid="add-symbol-button" onClick={addSymbol} className="btn-primary">Add</Button>
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 160px 140px 120px', gap: 12 }}>
+                <div ref={searchBoxRef}>
+                  <Label htmlFor="symbol" className="text-sm">Add stock or fund</Label>
+                  <div style={{ position: 'relative', marginTop: 6 }}>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Input data-testid="search-input" placeholder="Search (e.g., Reliance, TCS, NIFTY)" value={query} onFocus={() => setOpenSearch(true)} onChange={e => { setQuery(e.target.value); setOpenSearch(true); }} />
+                      <Button data-testid="manual-add-button" className="btn-primary" onClick={() => addToWatchlist(newSymbol || query)}>
+                        Add
+                      </Button>
+                    </div>
+                    {openSearch && (results?.length > 0 || query.length >= 2) && (
+                      <div className="panel" style={{ position: 'absolute', top: '110%', left: 0, right: 0, zIndex: 40, padding: 0 }} data-testid="search-dropdown">
+                        <Command>
+                          <div style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 10px' }}>
+                            <Search size={14} />
+                            <CommandInput placeholder="Type to search" value={query} onValueChange={setQuery} />
+                          </div>
+                          <CommandList>
+                            {results?.length === 0 && <CommandEmpty>No results</CommandEmpty>}
+                            {results?.map((r) => (
+                              <CommandItem key={r.symbol} onSelect={() => { addToWatchlist(r.symbol); setOpenSearch(false); }} data-testid={`search-result-${r.symbol}`}>
+                                <div style={{ display:'flex', justifyContent:'space-between', width:'100%' }}>
+                                  <span>{r.name}</span>
+                                  <span style={{ color:'#0ea5a4', fontWeight:600 }}>{r.symbol}</span>
+                                </div>
+                              </CommandItem>
+                            ))}
+                          </CommandList>
+                        </Command>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div>

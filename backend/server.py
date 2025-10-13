@@ -22,6 +22,7 @@ except Exception:  # pragma: no cover
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import httpx
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -32,7 +33,7 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ.get('DB_NAME', 'test_database')]
 
 # FastAPI app and router (/api prefix is mandatory for ingress)
-app = FastAPI(title="AI Trading Agent API", version="0.1.0")
+app = FastAPI(title="AI Trading Agent API", version="0.2.0")
 api_router = APIRouter(prefix="/api")
 
 # CORS
@@ -303,6 +304,52 @@ async def get_status_checks():
         if isinstance(it.get('timestamp'), str):
             it['timestamp'] = datetime.fromisoformat(it['timestamp'])
     return items
+
+@api_router.get("/search")
+async def search_symbols(q: str = Query(..., min_length=2), region: str = Query('IN')):
+    """Yahoo Finance search proxy for client autocomplete.
+    Returns simplified list of {symbol, name, exch, type}.
+    """
+    url = "https://query1.finance.yahoo.com/v1/finance/search"
+    params = {
+        "q": q,
+        "quotesCount": 10,
+        "newsCount": 0,
+        "listsCount": 0,
+        "enableFuzzyQuery": True,
+        "lang": "en-US",
+        "region": region,
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0 Safari/537.36"
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client_hx:
+            r = await client_hx.get(url, params=params, headers=headers)
+            r.raise_for_status()
+            data = r.json() or {}
+            quotes = data.get("quotes", [])
+            out = []
+            for qd in quotes:
+                sym = qd.get("symbol")
+                nm = qd.get("shortname") or qd.get("longname") or qd.get("name")
+                exch = qd.get("exchDisp") or qd.get("exchange")
+                typ = qd.get("quoteType") or qd.get("typeDisp")
+                if not sym or not nm:
+                    continue
+                # Prefer India tickers .NS/.BO when region IN
+                if region.upper() == 'IN' and (sym.endswith('.NS') or sym.endswith('.BO')):
+                    out.append({"symbol": sym, "name": nm, "exchange": exch, "type": typ})
+                elif region.upper() != 'IN':
+                    out.append({"symbol": sym, "name": nm, "exchange": exch, "type": typ})
+            # Deduplicate by symbol
+            dedup = {}
+            for it in out:
+                dedup[it["symbol"]] = it
+            return {"results": list(dedup.values())[:10]}
+    except Exception as e:
+        logger.exception("Search failed: %s", e)
+        raise HTTPException(status_code=502, detail="Search service unavailable")
 
 @api_router.post("/analyze", response_model=AIRecommendation)
 async def analyze(req: AnalyzeRequest):
