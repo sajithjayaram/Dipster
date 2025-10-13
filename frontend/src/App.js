@@ -85,7 +85,6 @@ function Home() {
     // Initial fetch once
     symbols.forEach(s => analyze(s));
     // note: intentionally not including analyze in deps to avoid re-runs
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
