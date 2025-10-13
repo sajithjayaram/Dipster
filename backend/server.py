@@ -48,7 +48,7 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ.get('DB_NAME', 'test_database')]
 
 # App & Router
-app = FastAPI(title="AI Trading Agent API", version="0.5.0")
+app = FastAPI(title="AI Trading Agent API", version="0.5.1")
 api_router = APIRouter(prefix="/api")
 
 # CORS
@@ -72,7 +72,7 @@ JWT_EXPIRE_MIN = int(os.environ.get("JWT_EXPIRE_MIN", "10080"))  # 7 days
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
-GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI")  # e.g., https://<domain>/api/auth/google/callback
+GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI")
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
@@ -138,7 +138,7 @@ class WatchlistUpdate(BaseModel):
     symbols: List[str]
 
 class TelegramConfig(BaseModel):
-    chat_id: str
+    chat_id: Optional[str] = None
     enabled: bool = True
     buy_threshold: int = 80
     sell_threshold: int = 60
@@ -464,7 +464,6 @@ async def google_callback(code: Optional[str] = None):
         return JSONResponse({"error": "missing_code"}, status_code=400)
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET or not GOOGLE_REDIRECT_URI:
         raise HTTPException(status_code=500, detail="google_oauth_not_configured")
-    # Exchange code
     token_data = {
         "code": code,
         "client_id": GOOGLE_CLIENT_ID,
@@ -487,7 +486,6 @@ async def google_callback(code: Optional[str] = None):
     email = userinfo.get("email")
     if not email:
         return JSONResponse({"error": "email_not_found"}, status_code=400)
-    # Upsert user
     existing = await db.users.find_one({"email": email})
     if not existing:
         user = {
@@ -504,7 +502,6 @@ async def google_callback(code: Optional[str] = None):
     else:
         uid = existing['id']
     token = create_token(uid, email)
-    # Redirect to frontend root with token in query
     return RedirectResponse(url=f"/\u003Ftoken={token}")
 
 # Profile
@@ -535,6 +532,17 @@ async def history(symbol: str, timeframe: str = 'weekly', limit: int = 20, curre
     return {"items": await cursor.to_list(length=limit)}
 
 # Telegram alerts config
+@api_router.get("/alerts/telegram/config")
+async def get_telegram_cfg(current=Depends(get_current_user)):
+    u = await db.users.find_one({"id": current['id']}, {"_id": 0, "telegram_chat_id": 1, "alert_settings": 1})
+    cfg = u.get('alert_settings', {}) if u else {}
+    return {
+        "chat_id": u.get('telegram_chat_id') if u else None,
+        "enabled": bool(cfg.get('enabled', False)),
+        "buy_threshold": int(cfg.get('buy_threshold', 80)),
+        "sell_threshold": int(cfg.get('sell_threshold', 60)),
+    }
+
 @api_router.post("/alerts/telegram/config")
 async def set_telegram(cfg: TelegramConfig, current=Depends(get_current_user)):
     await db.users.update_one({"id": current['id']}, {"$set": {"telegram_chat_id": cfg.chat_id, "alert_settings": {"enabled": cfg.enabled, "buy_threshold": cfg.buy_threshold, "sell_threshold": cfg.sell_threshold}}})
@@ -600,11 +608,10 @@ async def analyze(req: AnalyzeRequest,
     symbol = req.symbol.strip()
     df = await fetch_ohlcv(symbol, req.timeframe)
     indicators = compute_indicators(df)
-    # Prefer user-provided model if headers present; otherwise fallback to baseline heuristics
     rec = await call_llm(llm_provider, llm_model, llm_key, symbol, req.timeframe, indicators)
     if not rec.indicators_snapshot:
         rec.indicators_snapshot = indicators['snapshot']
-    # Save history if user is authenticated
+    # Save history if JWT present
     auth = request.headers.get('Authorization')
     if auth and auth.lower().startswith('bearer '):
         try:
@@ -652,18 +659,16 @@ async def alerts_loop():
                 settings = u.get('alert_settings', {})
                 buy_th = int(settings.get('buy_threshold', 80))
                 sell_th = int(settings.get('sell_threshold', 60))
-                watch = u.get('watchlist', [])[:20]  # cap
+                watch = u.get('watchlist', [])[:20]
                 for sym in watch:
                     try:
                         df = await fetch_ohlcv(sym, 'weekly')
                         indicators = compute_indicators(df)
                         conf = indicators.get('baseline_confidence', 60)
                         action = indicators.get('baseline_signal', 'hold')
-                        # thresholds
                         trigger = (action == 'buy' and conf >= buy_th) or (action == 'sell' and conf >= sell_th)
                         if not trigger:
                             continue
-                        # dedupe using last_alerts
                         last_map = u.get('last_alerts', {})
                         key = f"{sym}_weekly"
                         last_entry = last_map.get(key)
@@ -672,14 +677,13 @@ async def alerts_loop():
                         text = f"Signal {action.upper()} for {sym} (weekly)\nConfidence: {conf}%\nReason: {'; '.join(indicators.get('baseline_reasons', [])[:3])}"
                         async with httpx.AsyncClient(timeout=10) as hx:
                             await hx.post(send_url, json={"chat_id": chat_id, "text": text})
-                        # update last_alerts
                         last_map[key] = {"action": action, "ts": datetime.now(timezone.utc).timestamp()}
                         await db.users.update_one({"id": u['id']}, {"$set": {"last_alerts": last_map}})
                     except Exception:
                         continue
         except Exception as e:
             logger.exception("alerts loop error: %s", e)
-        await asyncio.sleep(300)  # 5 minutes
+        await asyncio.sleep(300)
 
 @app.on_event("startup")
 async def start_alerts():
