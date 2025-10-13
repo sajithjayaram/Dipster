@@ -74,6 +74,16 @@ class AIRecommendation(BaseModel):
     take_profit: Optional[float] = None
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+# Strict model for Structured Outputs (no free-form dicts)
+class AITightRecommendation(BaseModel):
+    symbol: str
+    timeframe: str
+    action: Literal['buy', 'sell', 'hold']
+    confidence: float = Field(ge=0, le=100)
+    reasons: List[str]
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+
 # --------------- Utilities ---------------
 
 def _safely_get_env(name: str) -> str:
