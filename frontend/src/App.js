@@ -10,7 +10,8 @@ import { Switch } from './components/ui/switch.jsx';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from './components/ui/select.jsx';
 import { Separator } from './components/ui/separator.jsx';
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from './components/ui/command.jsx';
-import { BarChart3, Activity, AlertTriangle, Search } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from './components/ui/dialog.jsx';
+import { BarChart3, Activity, AlertTriangle, Search, User } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -30,69 +31,93 @@ const defaultIN = ['RELIANCE.NS', 'TCS.NS', 'INFY.NS'];
 function formatAction(action) { return action?.toUpperCase(); }
 
 function Home() {
+  // core app state
   const [symbols, setSymbols] = useState(defaultIN);
-  const [newSymbol, setNewSymbol] = useState('');
   const [timeframe, setTimeframe] = useState('weekly');
   const [market, setMarket] = useState('IN');
   const [live, setLive] = useState(false);
   const [loadingMap, setLoadingMap] = useState({});
   const [recs, setRecs] = useState({});
 
+  // auth state
+  const [token, setToken] = useState(() => sessionStorage.getItem('token') || '');
+  const [email, setEmail] = useState('');
+  const [authOpen, setAuthOpen] = useState(false);
+  const [isSignup, setIsSignup] = useState(false);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+
+  // profile state (provider/model) and per-session key
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [provider, setProvider] = useState(() => sessionStorage.getItem('llm_provider') || 'openai');
+  const [model, setModel] = useState(() => sessionStorage.getItem('llm_model') || 'gpt-5-mini');
+  const [llmKey, setLlmKey] = useState(() => sessionStorage.getItem('llm_key') || '');
+
   // search state
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [openSearch, setOpenSearch] = useState(false);
-  const searchBoxRef = useRef(null);
   const debounceRef = useRef(null);
 
-  const addToWatchlist = (s) => {
-    const S = s.trim().toUpperCase();
-    if (!S) return;
-    if (symbols.includes(S)) { toast.info('Already on watchlist'); return; }
-    setSymbols(prev => [S, ...prev]);
-    setNewSymbol('');
-    setQuery('');
-    setResults([]);
-    setOpenSearch(false);
-    toast.success(`${S} added`);
+  const isAuthed = !!token;
+
+  const setSession = (t) => {
+    if (t) { sessionStorage.setItem('token', t); setToken(t); }
+    else { sessionStorage.removeItem('token'); setToken(''); }
   };
 
-  const removeSymbol = (s) => {
-    setSymbols(prev => prev.filter(x => x !== s));
-    setRecs(prev => { const cp = { ...prev }; delete cp[s]; return cp; });
+  const saveSessionLLM = (prov, mdl, key) => {
+    if (prov) { sessionStorage.setItem('llm_provider', prov); setProvider(prov); }
+    if (mdl) { sessionStorage.setItem('llm_model', mdl); setModel(mdl); }
+    if (key !== undefined) { sessionStorage.setItem('llm_key', key); setLlmKey(key); }
   };
 
-  const analyze = async (s) => {
-    setLoadingMap(m => ({ ...m, [s]: true }));
+  // ------- AUTH -------
+  const fetchMe = async (tok) => {
     try {
-      const res = await axios.post(`${API}/analyze`, { symbol: s, timeframe, market });
-      setRecs(prev => ({ ...prev, [s]: res.data }));
-      toast.success(`Analysis ready for ${s}`);
+      const res = await axios.get(`${API}/auth/me`, { headers: { Authorization: `Bearer ${tok}` } });
+      setEmail(res.data.email);
+      // preload profile
+      setProvider(res.data.profile?.provider || 'openai');
+      setModel(res.data.profile?.model || 'gpt-5-mini');
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => { if (token) fetchMe(token); }, [token]);
+
+  const handleAuth = async () => {
+    if (!authEmail || !authPassword) { toast.error('Enter email and password'); return; }
+    try {
+      const url = isSignup ? `${API}/auth/signup` : `${API}/auth/login`;
+      const res = await axios.post(url, { email: authEmail, password: authPassword });
+      setSession(res.data.access_token);
+      toast.success(isSignup ? 'Signed up' : 'Logged in');
+      setAuthOpen(false);
+      setAuthEmail(''); setAuthPassword('');
     } catch (e) {
-      console.error(e);
-      toast.error(`Failed to analyze ${s}`);
-    } finally {
-      setLoadingMap(m => ({ ...m, [s]: false }));
+      toast.error(e?.response?.data?.detail || 'Auth failed');
     }
   };
 
-  const pollOne = async (s) => {
-    try {
-      const res = await axios.get(`${API}/signal/current`, { params: { symbol: s, timeframe } });
-      setRecs(prev => ({ ...prev, [s]: res.data }));
-    } catch (e) { /* silent */ }
+  const handleLogout = () => {
+    setSession('');
+    setEmail('');
   };
 
-  const startPoll = useMemo(() => () => { symbols.forEach(s => pollOne(s)); }, [symbols, timeframe]);
-  usePolling(live, startPoll, 60000);
+  // ------- PROFILE -------
+  const saveProfile = async () => {
+    if (!isAuthed) { toast.error('Login required'); return; }
+    try {
+      await axios.put(`${API}/profile`, { provider, model }, { headers: { Authorization: `Bearer ${token}` } });
+      saveSessionLLM(provider, model, llmKey);
+      toast.success('Profile saved');
+      setProfileOpen(false);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed to save profile');
+    }
+  };
 
-  useEffect(() => {
-    // Initial fetch for defaults
-    symbols.forEach(s => analyze(s));
-    // intentionally not including analyze in deps to avoid re-runs on every render
-  }, []);
-
-  // search fetcher with debounce
+  // ------- SEARCH -------
   const fetchSearch = useCallback((q) => {
     if (!q || q.length < 2) { setResults([]); return; }
     axios.get(`${API}/search`, { params: { q, region: market } })
@@ -102,8 +127,59 @@ function Home() {
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => fetchSearch(query), 250);
+    debounceRef.current = setTimeout(() => fetchSearch(query), 300);
   }, [query, fetchSearch]);
+
+  const addToWatchlist = (s) => {
+    const S = (s || '').trim().toUpperCase();
+    if (!S) return;
+    if (symbols.includes(S)) { toast.info('Already on watchlist'); return; }
+    setSymbols(prev => [S, ...prev]);
+    setQuery(''); setResults([]); setOpenSearch(false);
+    toast.success(`${S} added`);
+  };
+
+  const analyze = async (s) => {
+    if (!llmKey) { toast.error('Set your API key in Profile'); return; }
+    setLoadingMap(m => ({ ...m, [s]: true }));
+    try {
+      const res = await axios.post(`${API}/analyze`, { symbol: s, timeframe, market }, {
+        headers: {
+          'X-LLM-KEY': llmKey,
+          'X-LLM-PROVIDER': provider,
+          'X-LLM-MODEL': model,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        }
+      });
+      setRecs(prev => ({ ...prev, [s]: res.data }));
+      toast.success(`Analysis ready for ${s}`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || `Failed to analyze ${s}`);
+    } finally {
+      setLoadingMap(m => ({ ...m, [s]: false }));
+    }
+  };
+
+  const pollOne = async (s) => {
+    if (!llmKey) return;
+    try {
+      const res = await axios.get(`${API}/signal/current`, {
+        params: { symbol: s, timeframe },
+        headers: {
+          'X-LLM-KEY': llmKey,
+          'X-LLM-PROVIDER': provider,
+          'X-LLM-MODEL': model,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        }
+      });
+      setRecs(prev => ({ ...prev, [s]: res.data }));
+    } catch { /* silent */ }
+  };
+
+  const startPoll = useMemo(() => () => { symbols.forEach(s => pollOne(s)); }, [symbols, timeframe, provider, model, llmKey, token]);
+  usePolling(live, startPoll, 60000);
+
+  useEffect(() => { symbols.forEach(s => analyze(s)); }, []);
 
   return (
     <div className="app-shell">
@@ -116,7 +192,74 @@ function Home() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <Label htmlFor="live-switch" className="text-sm">Live alerts</Label>
-            <Switch id="live-switch" checked={live} onCheckedChange={setLive} data-testid="live-alerts-switch" />
+            <Switch id="live-switch" checked={live} onCheckedChange={(v)=>{ if(!llmKey && v){ toast.info('Set your API key in Profile'); return;} setLive(v); }} data-testid="live-alerts-switch" />
+            {isAuthed ? (
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <span className="text-sm" data-testid="user-email">{email || 'Logged in'}</span>
+                <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+                  <DialogTrigger asChild>
+                    <Button className="btn-primary" data-testid="open-profile-button"><User size={14} style={{ marginRight:6 }} /> Profile</Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Profile: Model & Key</DialogTitle>
+                      <DialogDescription>Choose provider, model, and set your session API key. We never store your key on the server.</DialogDescription>
+                    </DialogHeader>
+                    <div className="grid" style={{ gap: 12 }}>
+                      <div>
+                        <Label className="text-sm">Provider</Label>
+                        <Select value={provider} onValueChange={setProvider}>
+                          <SelectTrigger data-testid="provider-select"><SelectValue placeholder="Provider" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="openai" data-testid="provider-openai">OpenAI</SelectItem>
+                            <SelectItem value="anthropic" data-testid="provider-anthropic">Claude</SelectItem>
+                            <SelectItem value="gemini" data-testid="provider-gemini">Gemini</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-sm">Model</Label>
+                        <Input data-testid="model-input" placeholder={provider==='openai'?'gpt-5-mini':provider==='anthropic'?'claude-3-5-sonnet-20240620':'models/gemini-2.5-pro'} value={model} onChange={e=>setModel(e.target.value)} />
+                      </div>
+                      <div>
+                        <Label className="text-sm">Session API key</Label>
+                        <Input data-testid="session-key-input" type="password" placeholder="Paste your API key" value={llmKey} onChange={e=>setLlmKey(e.target.value)} />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button onClick={saveProfile} className="btn-primary" data-testid="save-profile-button">Save</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+                <Button variant="outline" onClick={handleLogout} data-testid="logout-button">Logout</Button>
+              </div>
+            ) : (
+              <Dialog open={authOpen} onOpenChange={setAuthOpen}>
+                <DialogTrigger asChild>
+                  <Button className="btn-primary" data-testid="open-login-button">Login / Signup</Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>{isSignup ? 'Create account' : 'Login'}</DialogTitle>
+                    <DialogDescription>Email/password auth. No keys are stored.</DialogDescription>
+                  </DialogHeader>
+                  <div className="grid" style={{ gap: 12 }}>
+                    <div>
+                      <Label className="text-sm">Email</Label>
+                      <Input data-testid="auth-email-input" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} placeholder="you@example.com" />
+                    </div>
+                    <div>
+                      <Label className="text-sm">Password</Label>
+                      <Input data-testid="auth-password-input" type="password" value={authPassword} onChange={e=>setAuthPassword(e.target.value)} placeholder="••••••••" />
+                    </div>
+                    <div style={{ display:'flex', gap:8 }}>
+                      <Button onClick={handleAuth} className="btn-primary" data-testid="auth-submit-button">{isSignup ? 'Sign up' : 'Login'}</Button>
+                      <Button variant="outline" onClick={()=>setIsSignup(v=>!v)} data-testid="toggle-auth-mode">{isSignup ? 'Switch to Login' : 'Switch to Signup'}</Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            )}
           </div>
         </div>
       </div>
@@ -130,14 +273,12 @@ function Home() {
             </p>
             <div className="panel" style={{ padding: 16, marginTop: 16 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 160px 140px 120px', gap: 12 }}>
-                <div ref={searchBoxRef}>
-                  <Label htmlFor="symbol" className="text-sm">Add stock or fund</Label>
+                <div>
+                  <Label className="text-sm">Add stock or fund</Label>
                   <div style={{ position: 'relative', marginTop: 6 }}>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <Input data-testid="search-input" placeholder="Search (e.g., Reliance, TCS, NIFTY)" value={query} onFocus={() => setOpenSearch(true)} onChange={e => { setQuery(e.target.value); setOpenSearch(true); }} />
-                      <Button data-testid="manual-add-button" className="btn-primary" onClick={() => addToWatchlist(newSymbol || query)}>
-                        Add
-                      </Button>
+                      <Input data-testid="search-input" placeholder="Search (e.g., Reliance, TCS, NIFTY)" value={query} onFocus={()=>setOpenSearch(true)} onChange={e=>{ setQuery(e.target.value); setOpenSearch(true); }} />
+                      <Button data-testid="manual-add-button" className="btn-primary" onClick={()=> addToWatchlist(query)}>Add</Button>
                     </div>
                     {openSearch && (results?.length > 0 || query.length >= 2) && (
                       <div className="panel" style={{ position: 'absolute', top: '110%', left: 0, right: 0, zIndex: 40, padding: 0 }} data-testid="search-dropdown">
@@ -192,6 +333,11 @@ function Home() {
                   </span>
                 ))}
               </div>
+              {!llmKey && (
+                <div className="text-sm" style={{ color:'#b45309', marginTop: 10 }} data-testid="missing-key-banner">
+                  Set your session API key in Profile to enable AI analysis.
+                </div>
+              )}
             </div>
           </div>
           <div className="panel" style={{ padding: 16 }}>
@@ -200,7 +346,7 @@ function Home() {
               <div className="text-sm text-slate-600">Tip: NSE tickers use .NS suffix. Example: TCS.NS, INFY.NS, RELIANCE.NS</div>
             </div>
             <Separator className="my-4" />
-            <div className="text-xs text-slate-500">Data from Yahoo Finance. AI: OpenAI GPT‑5 (server-side). We never hardcode URLs; using environment config.</div>
+            <div className="text-xs text-slate-500">Providers: OpenAI, Claude, Gemini. Keys are per-session only and never stored server-side.</div>
           </div>
         </section>
 
@@ -217,7 +363,7 @@ function Home() {
                       <CardTitle className="card-title">{s}</CardTitle>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <span className={`badge ${action}`} data-testid={`action-badge-${s}`}>{formatAction(action)}</span>
-                        <Button data-testid={`analyze-button-${s}`} className="btn-primary" onClick={() => analyze(s)} disabled={loading}>
+                        <Button data-testid={`analyze-button-${s}`} className="btn-primary" onClick={() => analyze(s)} disabled={loading || !llmKey}>
                           {loading ? 'Analyzing…' : 'Analyze'}
                         </Button>
                       </div>
@@ -250,7 +396,7 @@ function Home() {
           </div>
         </section>
 
-        <footer className="footer">Built for speed: MVP with robust backend endpoints under /api. Live polling every 60s when enabled.</footer>
+        <footer className="footer">Built for speed: Auth + Profile ready. Set your model/provider and session key to enable analysis. Live polling every 60s when enabled.</footer>
       </main>
 
       <Toaster position="top-right" richColors />
