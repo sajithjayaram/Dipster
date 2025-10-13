@@ -247,8 +247,19 @@ async def call_openai_recommendation(symbol: str, timeframe: str, indicators: Di
             ),
             timeout=float(os.environ.get('OPENAI_TIMEOUT_SECONDS', '30')),
         )
-        parsed: AIRecommendation = resp.output_parsed
-        return parsed
+        tight = resp.output_parsed
+        # Adapt to full schema by adding indicators snapshot and timestamp
+        snap = indicators['snapshot']
+        return AIRecommendation(
+            symbol=tight.symbol,
+            timeframe=tight.timeframe,
+            action=tight.action,
+            confidence=tight.confidence,
+            reasons=tight.reasons,
+            indicators_snapshot=snap,
+            stop_loss=tight.stop_loss,
+            take_profit=tight.take_profit,
+        )
     except asyncio.TimeoutError:
         logger.error("OpenAI request timed out for %s", symbol)
         raise HTTPException(status_code=504, detail="AI analysis timed out. Please retry.")
