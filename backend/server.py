@@ -239,8 +239,8 @@ async def call_openai_recommendation(symbol: str, timeframe: str, indicators: Di
                     {"role": "system", "content": system_instruction},
                     {"role": "user", "content": user_content},
                 ],
-                # Map to our Pydantic model
-                text_format=AIRecommendation,
+                # Map to our STRICT Pydantic model for the LLM response
+                text_format=AITightRecommendation,
                 reasoning={"effort": os.environ.get('OPENAI_REASONING', 'low')},
                 max_output_tokens=int(os.environ.get('OPENAI_MAX_TOKENS', '350')),
                 temperature=float(os.environ.get('OPENAI_TEMPERATURE', '0.1')),
