@@ -234,7 +234,6 @@ async def call_openai_recommendation(symbol: str, timeframe: str, indicators: Di
                 reasoning={"effort": os.environ.get('OPENAI_REASONING', 'low')},
                 max_output_tokens=int(os.environ.get('OPENAI_MAX_TOKENS', '350')),
                 temperature=float(os.environ.get('OPENAI_TEMPERATURE', '0.1')),
-                verbosity=os.environ.get('OPENAI_VERBOSITY', 'low'),
             ),
             timeout=float(os.environ.get('OPENAI_TIMEOUT_SECONDS', '30')),
         )
