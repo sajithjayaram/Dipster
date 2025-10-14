@@ -389,7 +389,7 @@ function Home() {
               Track stocks, mutual funds and commodities. Get weekly recommendations with clear reasoning. Data powered by Yahoo Finance.
             </p>
             <div className="panel" style={{ padding: 16, marginTop: 16 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 160px 140px 120px', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 160px 140px 120px 140px', gap: 12 }}>
                 <div>
                   <Label className="text-sm">Add stock or fund</Label>
                   <div style={{ position: 'relative', marginTop: 6 }}>
