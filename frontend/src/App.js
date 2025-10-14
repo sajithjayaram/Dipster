@@ -198,6 +198,12 @@ function Home() {
 
   // ------- ANALYZE -------
   const analyze = async (s) => {
+  // persist preferences
+  useEffect(()=>{ try{ localStorage.setItem('symbols', JSON.stringify(symbols)); }catch{} }, [symbols]);
+  useEffect(()=>{ localStorage.setItem('timeframe', timeframe); }, [timeframe]);
+  useEffect(()=>{ localStorage.setItem('market', market); }, [market]);
+  useEffect(()=>{ localStorage.setItem('live_alerts', live ? '1':'0'); }, [live]);
+
     if (!llmKey) { toast.error('Set your API key in Profile'); return; }
     setLoadingMap(m => ({ ...m, [s]: true }));
     try {
