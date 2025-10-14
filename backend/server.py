@@ -483,4 +483,4 @@ async def google_callback(code: Optional[str] = None):
         access_token = token_json.get("access_token")
         if not access_token:
             return JSONResponse({"error": "no_access_token"}, status_code=400)
-        ur = await hx.get("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {access_token}```
+        ur = await hx.get("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {access_token}"})
