@@ -130,6 +130,10 @@ function Home() {
       setTgChatId(res.data.chat_id || '');
       setTgBuy(res.data.buy_threshold ?? 80);
       setTgSell(res.data.sell_threshold ?? 60);
+      setTgFreq(res.data.frequency_min ?? 60);
+      setTgQuietStart(res.data.quiet_start_hour ?? 22);
+      setTgQuietEnd(res.data.quiet_end_hour ?? 7);
+      setTgTz(res.data.timezone || 'Asia/Kolkata');
     } catch { /* ignore */ }
   };
 
