@@ -231,7 +231,7 @@ function Home() {
     if (!llmKey) return;
     try {
       const res = await axios.get(`${API}/signal/current`, {
-        params: { symbol: s, timeframe },
+        params: { symbol: s, timeframe, source },
         headers: {
           'X-LLM-KEY': llmKey,
           'X-LLM-PROVIDER': provider,
