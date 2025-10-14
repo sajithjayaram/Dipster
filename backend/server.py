@@ -258,6 +258,43 @@ def create_token(uid: str, email: str) -> str:
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
 
+
+# ---------- Auth helpers and profile routes ----------
+async def _require_user(request: Request) -> Dict[str, Any]:
+    auth = request.headers.get('Authorization')
+    if not auth or not auth.lower().startswith('bearer '):
+        raise HTTPException(status_code=401, detail="missing_or_invalid_token")
+    token = auth.split(' ', 1)[1]
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+        uid = payload.get('sub')
+        if not uid:
+            raise HTTPException(status_code=401, detail="invalid_token")
+        user = await db.users.find_one({"id": uid})
+        if not user:
+            raise HTTPException(status_code=404, detail="user_not_found")
+        return user
+    except JWTError:
+        raise HTTPException(status_code=401, detail="invalid_token")
+
+@api_router.get("/auth/me")
+async def auth_me(request: Request):
+    user = await _require_user(request)
+    prof = user.get('profile') or {"provider":"openai","model": os.environ.get('OPENAI_MODEL','gpt-5-mini')}
+    return {"id": user['id'], "email": user['email'], "profile": prof}
+
+@api_router.get("/profile")
+async def get_profile(request: Request):
+    user = await _require_user(request)
+    prof = user.get('profile') or {"provider":"openai","model": os.environ.get('OPENAI_MODEL','gpt-5-mini')}
+    return prof
+
+@api_router.put("/profile")
+async def put_profile(request: Request, p: Dict[str, Any]):
+    user = await _require_user(request)
+    await db.users.update_one({"id": user['id']}, {"$set": {"profile": p}})
+    return p
+
 # --------------- Google OAuth routes ---------------
 @api_router.get("/auth/google/login")
 async def google_login():
