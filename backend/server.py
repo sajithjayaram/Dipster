@@ -265,6 +265,31 @@ def compute_indicators(df: pd.DataFrame) -> Dict[str, Any]:
     score = max(0.0, min(100.0, score))
     return {'snapshot': snapshot, 'baseline_signal': heur_action, 'baseline_reasons': reasons, 'baseline_confidence': score}
 
+async def allocate_top(candidates: List[Dict[str, Any]], allocation: Dict[str,int]) -> List[Dict[str, Any]]:
+    # Greedy allocation by asset_class buckets
+    buckets: Dict[str, List[Dict[str,Any]]] = {}
+    for c in candidates:
+        ac = c.get('asset_class','stocks')
+        buckets.setdefault(ac, []).append(c)
+    # sort each bucket
+    for k in buckets:
+        buckets[k].sort(key=lambda x: x['score'], reverse=True)
+    result: List[Dict[str,Any]] = []
+    for ac, pct in allocation.items():
+        if pct <= 0 or ac not in buckets: continue
+        # pick proportionally; for MVP, take up to round(pct/20)
+        k = max(1, round(pct/20))
+        result.extend(buckets[ac][:k])
+    # if nothing selected, take top 5 overall
+    if not result:
+        result = sorted(candidates, key=lambda x: x['score'], reverse=True)[:5]
+    # dedup
+    seen=set(); out=[]
+    for r in result:
+        sym=r['symbol']
+        if sym in seen: continue
+        seen.add(sym); out.append(r)
+    return out
 # ---------------- LLM Calls (reuse previous) ----------------
 async def call_openai(symbol: str, timeframe: str, indicators: Dict[str, Any], api_key: str, model: str) -> AIRecommendation:
     if AsyncOpenAI is None: raise HTTPException(status_code=500, detail="OpenAI SDK not available on server")
