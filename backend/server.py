@@ -386,14 +386,15 @@ async def strategy_suggest(req: StrategyRequest,
                            llm_provider: Optional[str] = Header(default='openai', alias='X-LLM-PROVIDER'),
                            llm_model: Optional[str] = Header(default=None, alias='X-LLM-MODEL')):
     # Build universe and compute scores
-    universe = await build_universe(req.filters, limit=30)
-    results = []
-    # Limit heavy calls: evaluate up to 20 first
-    for it in universe[:20]:
+    universe = await build_universe(req.filters, limit=60)
+    results: List[Dict[str, Any]] = []
+    # Evaluate top 40 for better coverage
+    for it in universe[:40]:
         sym = it.get('symbol');
         r = await score_symbol(sym, req.filters.horizon if req.filters.horizon in ['daily','weekly'] else 'weekly', req.source, req.filters.momentum_preference, req.filters.value_preference)
         if r.get('ok'):
-            results.append({"symbol": sym, "name": it.get('name'), "score": r['score'], "ind": r['ind']})
+            ac = 'stocks' if sym.endswith('.NS') or sym.isalpha() else 'commodities'
+            results.append({"symbol": sym, "name": it.get('name'), "score": r['score'], "ind": r['ind'], "asset_class": ac})
     # Apply RSI filter if given
     if req.filters.rsi_min is not None or req.filters.rsi_max is not None:
         min_r = req.filters.rsi_min if req.filters.rsi_min is not None else -999
@@ -402,17 +403,18 @@ async def strategy_suggest(req: StrategyRequest,
             rsi = x['ind']['snapshot'].get('rsi_14')
             return (rsi is None) or (min_r <= rsi <= max_r)
         results = [x for x in results if ok_rsi(x)]
-    # Sort by score desc
-    results.sort(key=lambda x: x['score'], reverse=True)
-    top = results[: max(1, min(req.top_n, 10))]
+    # Allocation aware selection
+    alloc_selected = await allocate_top(results, req.filters.allocation)
+    # Finally cap to top_n overall
+    alloc_selected.sort(key=lambda x: x['score'], reverse=True)
+    top = alloc_selected[: max(1, min(req.top_n, 10))]
 
-    # Build picks with heuristics
     picks: List[StrategyPick] = []
     for x in top:
         ind = x['ind']
         action = ind.get('baseline_signal','hold')
         reasons = ind.get('baseline_reasons', [])
-        picks.append(StrategyPick(symbol=x['symbol'], name=x.get('name'), asset_class='stocks', score=float(x['score']), action=action, reasons=reasons))
+        picks.append(StrategyPick(symbol=x['symbol'], name=x.get('name'), asset_class=x.get('asset_class','stocks'), score=float(x['score']), action=action, reasons=reasons))
 
     used_ai = False
     # Try LLM to refine selections and reasons (optional; fallback safe)
