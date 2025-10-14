@@ -36,6 +36,7 @@ function Home() {
   const [symbols, setSymbols] = useState(() => { try { const s = localStorage.getItem('symbols'); return s ? JSON.parse(s) : defaultIN; } catch { return defaultIN; } });
   const [timeframe, setTimeframe] = useState(() => localStorage.getItem('timeframe') || 'weekly');
   const [market, setMarket] = useState(() => localStorage.getItem('market') || 'IN');
+  const [source, setSource] = useState(() => localStorage.getItem('data_source') || 'yahoo');
   const [live, setLive] = useState(() => localStorage.getItem('live_alerts') === '1');
   const [loadingMap, setLoadingMap] = useState({});
   const [recs, setRecs] = useState({});
