@@ -77,10 +77,11 @@ function Home() {
   const [value, setValue] = useState(false);
   const [rsiMin, setRsiMin] = useState('');
   const [rsiMax, setRsiMax] = useState('');
-  const [assetStocks, setAssetStocks] = useState(true);
-  const [assetETFs, setAssetETFs] = useState(true);
-  const [assetComms, setAssetComms] = useState(true);
-  const [assetMFs, setAssetMFs] = useState(false);
+  // Asset classes locked to Stocks for India-only mode
+  const [assetStocks] = useState(true);
+  const [assetETFs] = useState(false);
+  const [assetComms] = useState(false);
+  const [assetMFs] = useState(false);
   const [freePrompt, setFreePrompt] = useState('');
   const [topN, setTopN] = useState(5);
   const [picks, setPicks] = useState([]);
