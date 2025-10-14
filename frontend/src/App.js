@@ -137,7 +137,7 @@ function Home() {
     } catch { /* ignore */ }
   };
 
-  useEffect(() => { if (token) { fetchMe(token); fetchWatchlist(token); fetchTelegramCfg(token); } }, [token]);
+  useEffect(() => { if (token) { fetchMe(token); fetchWatchlist(token); fetchTelegramCfg(token); fetchThresholds(token); } }, [token]);
 
   const fetchThresholds = async (tok) => {
     try{
