@@ -161,6 +161,7 @@ class StrategyFilters(BaseModel):
     rsi_min: Optional[int] = None
     rsi_max: Optional[int] = None
     sectors: Optional[List[str]] = None
+    allocation: Dict[str, int] = Field(default_factory=lambda: {"stocks": 60, "etfs": 20, "commodities": 20})
 
 class StrategyRequest(BaseModel):
     filters: StrategyFilters
