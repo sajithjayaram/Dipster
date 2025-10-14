@@ -118,6 +118,8 @@ class StrategyPick(BaseModel):
     symbol: str
     name: Optional[str] = None
     asset_class: Literal['stocks'] = 'stocks'
+from urllib.parse import urlencode
+
     sector: Optional[str] = None
     cap: Optional[Literal['largecap','midcap','smallcap']] = None
     score: float
