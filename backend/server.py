@@ -258,6 +258,32 @@ def compute_indicators(df: pd.DataFrame) -> Dict[str, Any]:
         elif snapshot['rsi_14'] > 70: reasons.append("RSI>70 overbought"); heur_action='sell'; score-=15
     if snapshot['sma_50'] and snapshot['sma_200']:
         if snapshot['sma_50'] > snapshot['sma_200']: reasons.append("SMA50>SMA200 uptrend"); score+=20; heur_action = heur_action if heur_action!='hold' else 'buy'
+async def allocate_top(candidates: List[Dict[str, Any]], allocation: Dict[str,int]) -> List[Dict[str, Any]]:
+    # Greedy allocation by asset_class buckets
+    buckets: Dict[str, List[Dict[str,Any]]] = {}
+    for c in candidates:
+        ac = c.get('asset_class','stocks')
+        buckets.setdefault(ac, []).append(c)
+    # sort each bucket
+    for k in buckets:
+        buckets[k].sort(key=lambda x: x['score'], reverse=True)
+    result: List[Dict[str,Any]] = []
+    for ac, pct in allocation.items():
+        if pct <= 0 or ac not in buckets: continue
+        # pick proportionally; for MVP, take up to round(pct/20)
+        k = max(1, round(pct/20))
+        result.extend(buckets[ac][:k])
+    # if nothing selected, take top 5 overall
+    if not result:
+        result = sorted(candidates, key=lambda x: x['score'], reverse=True)[:5]
+    # dedup
+    seen=set(); out=[]
+    for r in result:
+        sym=r['symbol']
+        if sym in seen: continue
+        seen.add(sym); out.append(r)
+    return out
+
         elif snapshot['sma_50'] < snapshot['sma_200']: reasons.append("SMA50<SMA200 downtrend"); score-=20; heur_action = heur_action if heur_action!='hold' else 'sell'
     if snapshot['macd_hist'] is not None:
         if snapshot['macd_hist'] > 0: reasons.append("MACD hist positive"); score+=10
