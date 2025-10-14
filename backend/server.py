@@ -61,6 +61,11 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-not-for-prod")
 JWT_ALGO = os.environ.get("JWT_ALGO", "HS256")
 JWT_EXPIRE_MIN = int(os.environ.get("JWT_EXPIRE_MIN", "10080"))
 
+# Google OAuth
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI")
+
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
 # ---------------- Models (India-only) ----------------
