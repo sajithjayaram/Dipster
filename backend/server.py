@@ -81,7 +81,7 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 class AnalyzeRequest(BaseModel):
     symbol: str
     timeframe: Literal['weekly', 'daily', 'intraday'] = 'weekly'
-    market: Literal['IN', 'US', 'OTHER'] = 'IN'
+    market: Literal['IN'] = 'IN'
     source: Literal['yahoo', 'msn'] = 'yahoo'
 
 class AIRecommendation(BaseModel):
