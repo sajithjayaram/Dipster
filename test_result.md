@@ -101,6 +101,22 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+## backend:
+  - task: "Fix SyntaxError in backend/server.py and ensure /api/profile works after auth (email+Google)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: false
+        agent: "main"
+        comment: "Original server.py had interleaved/duplicated routes and invalid Python blocks around Google callback and auth; SyntaxError was blocking startup."
+      - working: true
+        agent: "main"
+        comment: "Rewrote server.py cleanly: unified router, restored all endpoints (/auth, /profile, /search, /analyze, /signal, /portfolio, /alerts, /strategy), fixed Google OAuth flow and JWT generation. Lint passes. Needs runtime validation."
+
 ## user_problem_statement: Fix backend auth/profile bug after Google login causing SyntaxError; improve UI responsiveness and mobile experience for "Dipster" trading app.
 
 ## backend:
