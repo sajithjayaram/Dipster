@@ -389,6 +389,10 @@ async def signup_v2(req: Dict[str, Any]):
 async def login_v2(req: Dict[str, Any]):
     email = req.get('email'); password = req.get('password')
     user = await db.users.find_one({"email": email})
+    if not user or not pwd_context.verify(password, user.get('password_hash','')):
+        raise HTTPException(status_code=401, detail="invalid_credentials")
+    token = jwt.encode({"sub": user['id'], "email": email, "exp": datetime.now(timezone.utc)+timedelta(minutes=JWT_EXPIRE_MIN)}, JWT_SECRET, algorithm=JWT_ALGO)
+    return {"access_token": token, "token_type": "bearer"}
 
 # ---- Portfolio, Alerts, Search, Analyze, Signal ----
 
