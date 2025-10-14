@@ -508,3 +508,72 @@ async def google_callback(code: Optional[str] = None):
         uid = existing['id']
     token = create_token(uid, email)
     return RedirectResponse(url=f"/\u003Ftoken={token}")
+
+
+# Test alert endpoint
+@api_router.post("/alerts/telegram/test")
+async def test_alert(body: TestAlertRequest, current=Depends(get_current_user)):
+    if not TELEGRAM_BOT_TOKEN:
+        raise HTTPException(status_code=500, detail="telegram_not_configured")
+    # fetch chat from user if not provided
+    user = await db.users.find_one({"id": current['id']}, {"_id": 0, "telegram_chat_id": 1})
+    chat_id = body.chat_id or (user or {}).get('telegram_chat_id')
+    if not chat_id:
+        raise HTTPException(status_code=400, detail="missing_chat_id")
+    send_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    async with httpx.AsyncClient(timeout=10) as hx:
+        r = await hx.post(send_url, json={"chat_id": chat_id, "text": body.text or "Test alert"})
+        if r.status_code != 200:
+            raise HTTPException(status_code=502, detail="telegram_send_failed")
+    return {"ok": True}
+
+# Include router at end (ensure all routes added)
+app.include_router(api_router)
+
+# ---------------- Alerts background (heuristics-based) ----------------
+async def alerts_loop():
+    if not TELEGRAM_BOT_TOKEN:
+        logger.info("Telegram bot token not configured; alerts disabled")
+        return
+    send_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    while True:
+        try:
+            users = db.users.find({"alert_settings.enabled": True, "telegram_chat_id": {"$exists": True}})
+            async for u in users:
+                chat_id = u.get('telegram_chat_id')
+                settings = u.get('alert_settings', {})
+                buy_th = int(settings.get('buy_threshold', 80))
+                sell_th = int(settings.get('sell_threshold', 60))
+                watch = u.get('watchlist', [])[:20]
+                for sym in watch:
+                    try:
+                        df = await fetch_ohlcv(sym, 'weekly')
+                        indicators = compute_indicators(df)
+                        conf = indicators.get('baseline_confidence', 60)
+                        action = indicators.get('baseline_signal', 'hold')
+                        trigger = (action == 'buy' and conf >= buy_th) or (action == 'sell' and conf >= sell_th)
+                        if not trigger:
+                            continue
+                        last_map = u.get('last_alerts', {})
+                        key = f"{sym}_weekly"
+                        last_entry = last_map.get(key)
+                        if last_entry and last_entry.get('action') == action and (datetime.now(timezone.utc).timestamp() - last_entry.get('ts', 0)) < 3600:
+                            continue
+                        text = f"Signal {action.upper()} for {sym} (weekly)\nConfidence: {conf}%\nReason: {'; '.join(indicators.get('baseline_reasons', [])[:3])}"
+                        async with httpx.AsyncClient(timeout=10) as hx:
+                            await hx.post(send_url, json={"chat_id": chat_id, "text": text})
+                        last_map[key] = {"action": action, "ts": datetime.now(timezone.utc).timestamp()}
+                        await db.users.update_one({"id": u['id']}, {"$set": {"last_alerts": last_map}})
+                    except Exception:
+                        continue
+        except Exception as e:
+            logger.exception("alerts loop error: %s", e)
+        await asyncio.sleep(300)
+
+@app.on_event("startup")
+async def start_alerts():
+    asyncio.create_task(alerts_loop())
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    client.close()
