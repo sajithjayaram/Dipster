@@ -323,6 +323,17 @@ function Home() {
                             <Input data-testid="tg-buy-input" type="number" min={0} max={100} value={tgBuy} onChange={e=>setTgBuy(parseInt(e.target.value||'80',10))} />
                           </div>
                           <div>
+                <div>
+                  <Label className="text-sm">Data Source</Label>
+                  <Select value={source} onValueChange={setSource}>
+                    <SelectTrigger data-testid="source-select"><SelectValue placeholder="Source" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="yahoo" data-testid="source-yahoo">Yahoo</SelectItem>
+                      <SelectItem value="msn" data-testid="source-msn">MSN</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
                             <Label className="text-sm">Sell threshold</Label>
                             <Input data-testid="tg-sell-input" type="number" min={0} max={100} value={tgSell} onChange={e=>setTgSell(parseInt(e.target.value||'60',10))} />
                           </div>
