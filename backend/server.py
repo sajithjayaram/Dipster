@@ -295,27 +295,6 @@ async def google_callback(code: Optional[str] = None, error: Optional[str] = Non
     token = create_token(uid, email)
     return RedirectResponse(url=f"/\u003Ftoken={token}")
 
-    out: List[Dict[str,str]] = []
-    if filters.sectors:
-        # use INDIA_SECTORS to gather all matching sectors
-        wanted = set(filters.sectors)
-        for sym, meta in INDIA_SECTORS.items():
-            if meta.get('sector') in wanted:
-                out.append({"symbol": sym, "name": meta.get('name'), "sector": meta.get('sector'), "cap": meta.get('cap')})
-    else:
-        # general list limited
-        for it in INDIA_TICKERS[:50]:
-            sym = it.get('symbol');
-            meta = INDIA_SECTORS.get(sym, {})
-            out.append({"symbol": sym, "name": it.get('name'), "sector": meta.get('sector'), "cap": meta.get('cap')})
-    # Dedup and cap
-    seen = set(); dedup = []
-    for it in out:
-        sym = it.get('symbol');
-        if not sym or sym in seen: continue
-        seen.add(sym); dedup.append(it)
-    return dedup[:limit]
-
 async def score_symbol(sym: str, timeframe: str, source: str, momentum: bool, value: bool) -> Dict[str, Any]:
     try:
         df = await fetch_ohlcv(sym, timeframe, source)
