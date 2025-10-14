@@ -323,17 +323,20 @@ function Home() {
   return (
     <div className="app-shell">
       <div className="header">
-        <div className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-          <div className="brand">
+        <div className="container headbar">
+          <div className="brand" style={{ flex: '1 1 auto' }}>
             <BarChart3 size={22} color="#0ea5a4" />
-            <div className="brand-title" style={{ fontSize: 18 }}>TradeSense AI</div>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <div className="brand-title">Dipster</div>
+              <div className="brand-tagline">Buy Low. Chill High.</div>
+            </div>
             <span className="brand-badge" data-testid="brand-badge">{timeframe === 'weekly' ? 'Weekly' : timeframe === 'daily' ? 'Daily' : 'Intraday'} • {market === 'IN' ? 'India' : market === 'US' ? 'US' : 'Other'}</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div className="head-right">
             <Label htmlFor="live-switch" className="text-sm">Live alerts</Label>
             <Switch id="live-switch" checked={live} onCheckedChange={(v)=>{ if(!llmKey && v){ toast.info('Set your API key in Profile'); return;} setLive(v); }} data-testid="live-alerts-switch" />
             {isAuthed ? (
-              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
                 <span className="text-sm" data-testid="user-email">{email || 'Logged in'}</span>
                 <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
                   <DialogTrigger asChild>
@@ -435,7 +438,7 @@ function Home() {
                 <Button variant="outline" onClick={handleLogout} data-testid="logout-button">Logout</Button>
               </div>
             ) : (
-              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
                 <Button className="btn-primary" data-testid="google-login-button" onClick={openGoogleLogin}><LogIn size={14} style={{ marginRight:6 }} /> Continue with Google</Button>
                 <Dialog open={authOpen} onOpenChange={setAuthOpen}>
                   <DialogTrigger asChild>
@@ -476,7 +479,7 @@ function Home() {
               Track stocks, mutual funds and commodities. Get weekly recommendations with clear reasoning. Data powered by Yahoo Finance.
             </p>
             <div className="panel" style={{ padding: 16, marginTop: 16 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 160px 140px 120px 140px', gap: 12 }}>
+              <div className="search-grid">
                 <div>
                   <Label className="text-sm">Add stock or fund</Label>
                   <div style={{ position: 'relative', marginTop: 6 }}>
@@ -553,7 +556,7 @@ function Home() {
                 <Wand2 size={18} color="#0ea5a4" />
                 <div className="font-semibold">Strategy Builder</div>
               </div>
-              <div className="grid" style={{ gridTemplateColumns:'repeat(6,minmax(0,1fr))', gap:12 }}>
+              <div className="strategy-grid">
                 <div>
                   <Label className="text-sm">Risk</Label>
                   <Select value={risk} onValueChange={setRisk}>
@@ -600,7 +603,7 @@ function Home() {
                 <Label className="text-sm">Extra prompt (optional)</Label>
                 <Textarea data-testid="strategy-prompt" placeholder="e.g. Prefer largecap IT with positive momentum" value={freePrompt} onChange={e=>setFreePrompt(e.target.value)} />
               </div>
-              <div style={{ display:'flex', gap:10, marginTop: 12 }}>
+              <div style={{ display:'flex', gap:10, marginTop: 12, flexWrap:'wrap' }}>
                 <Button className="btn-primary" onClick={runStrategy} data-testid="run-strategy-button" disabled={picking}>{picking? 'Building...' : 'Build strategy'}</Button>
               </div>
               {picks.length>0 && (
@@ -608,9 +611,9 @@ function Home() {
                   {picks.map((p)=> (
                     <div key={p.symbol} className="card card-col-span-6">
                       <Card data-testid={`strategy-pick-${p.symbol}`}>
-                        <CardHeader style={{ display:'flex', flexDirection:'row', alignItems:'center', justifyContent:'space-between' }}>
+                        <CardHeader style={{ display:'flex', flexDirection:'row', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap' }}>
                           <CardTitle className="card-title">{p.symbol} <span className="text-slate-500" style={{ fontWeight:500 }}>• {p.asset_class?.toUpperCase?.() || 'ASSET'}</span></CardTitle>
-                          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                          <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
                             <span className={`badge ${p.action}`} data-testid={`strategy-action-${p.symbol}`}>{formatAction(p.action)}</span>
                             <Button variant="outline" onClick={()=> addToWatchlist(p.symbol)} data-testid={`strategy-add-${p.symbol}`}>Add</Button>
                             <Button className="btn-primary" onClick={()=> analyze(p.symbol)} data-testid={`strategy-analyze-${p.symbol}`}>Analyze</Button>
@@ -653,9 +656,9 @@ function Home() {
               return (
                 <div key={s} className="card card-col-span-6">
                   <Card data-testid={`analysis-card-${s}`}>
-                    <CardHeader style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <CardHeader style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap:'wrap' }}>
                       <CardTitle className="card-title">{s}</CardTitle>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap:'wrap' }}>
                         <span className={`badge ${action}`} data-testid={`action-badge-${s}`}>{formatAction(action)}</span>
                         <Button data-testid={`remove-button-${s}`} variant="outline" onClick={() => removeFromWatchlist(s)}>Remove</Button>
                         <Button data-testid={`analyze-button-${s}`} className="btn-primary" onClick={() => analyze(s)} disabled={loading || !llmKey}>
@@ -702,7 +705,7 @@ function Home() {
           </div>
         </section>
 
-        <footer className="footer">Built for speed: Strategy Builder + Google login + Profile + Telegram alerts + Watchlist persistence. Set your model/provider and session key to enable analysis.</footer>
+        <footer className="footer">Dipster • Buy Low. Chill High. Strategy Builder + Google login + Profile + Telegram alerts + Watchlist persistence. Set your model/provider and session key to enable analysis.</footer>
       </main>
 
       <Toaster position="top-right" richColors />
