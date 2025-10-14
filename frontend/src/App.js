@@ -519,14 +519,7 @@ function Home() {
                 </div>
                 <div>
                   <Label className="text-sm">Market</Label>
-                  <Select value={market} onValueChange={setMarket}>
-                    <SelectTrigger data-testid="market-select"><SelectValue placeholder="Market" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="IN" data-testid="market-in">India</SelectItem>
-                      <SelectItem value="US" data-testid="market-us">US</SelectItem>
-                      <SelectItem value="OTHER" data-testid="market-other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <div className="chip" data-testid="market-fixed-in">India</div>
                 </div>
                 <div>
                   <Label className="text-sm">Data Source</Label>
