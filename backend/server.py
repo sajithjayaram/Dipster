@@ -139,11 +139,6 @@ class SymbolThreshold(BaseModel):
 class SymbolThresholdsPayload(BaseModel):
     items: List[SymbolThreshold]
 
-    rsi_max: Optional[int] = None
-    sectors: Optional[List[Literal['IT','Banking','Auto','Pharma','FMCG','Energy','Metals']]] = None
-    allocation: Dict[str, int] = Field(default_factory=lambda: {"stocks": 100})
-    caps_allocation: Dict[Literal['largecap','midcap','smallcap'], int] = Field(default_factory=lambda: {"largecap": 60, "midcap": 25, "smallcap": 15})
-
 class StrategyRequest(BaseModel):
     filters: StrategyFilters
     prompt: Optional[str] = None
