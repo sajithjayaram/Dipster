@@ -139,6 +139,13 @@ function Home() {
 
   useEffect(() => { if (token) { fetchMe(token); fetchWatchlist(token); fetchTelegramCfg(token); } }, [token]);
 
+  const fetchThresholds = async (tok) => {
+    try{
+      const res = await axios.get(`${API}/alerts/thresholds`, { headers: { Authorization: `Bearer ${tok}` } });
+      setThresholdsMap(res.data?.items || {});
+    }catch{}
+  };
+
   const handleAuth = async () => {
     if (!authEmail || !authPassword) { toast.error('Enter email and password'); return; }
     try {
