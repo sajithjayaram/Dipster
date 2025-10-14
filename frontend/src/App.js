@@ -266,6 +266,20 @@ function Home() {
                       <Separator />
                       <div className="grid" style={{ gap: 10 }}>
                         <Label className="text-sm">Global Alert Window</Label>
+                      <div className="grid" style={{ gap: 8 }}>
+                        <Label className="text-sm">Per-symbol thresholds</Label>
+                        <div className="text-xs text-slate-500">Click a value to edit. Unset values fall back to global thresholds.</div>
+                        <div className="panel" style={{ padding: 10 }}>
+                          {symbols.map(sym => (
+                            <div key={sym} style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap: 10, alignItems:'center', marginBottom: 6 }}>
+                              <div style={{ fontWeight:600 }}>{sym}</div>
+                              <Input data-testid={`sym-${sym}-buy`} type="number" min={0} max={100} value={thresholdsMap[sym]?.buy_threshold ?? ''} placeholder={`Buy ≥ ${tgBuy}`} onChange={e=> setThresholdsMap(prev=> ({ ...prev, [sym]: { ...(prev[sym]||{}), buy_threshold: e.target.value? parseInt(e.target.value,10): undefined } })) } />
+                              <Input data-testid={`sym-${sym}-sell`} type="number" min={0} max={100} value={thresholdsMap[sym]?.sell_threshold ?? ''} placeholder={`Sell ≥ ${tgSell}`} onChange={e=> setThresholdsMap(prev=> ({ ...prev, [sym]: { ...(prev[sym]||{}), sell_threshold: e.target.value? parseInt(e.target.value,10): undefined } })) } />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
                         <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
                           <div>
                             <Label className="text-sm">Min gap (minutes)</Label>
