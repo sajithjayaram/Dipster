@@ -202,6 +202,8 @@ function Home() {
   // persist preferences
   useEffect(()=>{ try{ localStorage.setItem('symbols', JSON.stringify(symbols)); }catch{} }, [symbols]);
   useEffect(()=>{ localStorage.setItem('timeframe', timeframe); }, [timeframe]);
+  useEffect(()=>{ localStorage.setItem('data_source', source); }, [source]);
+
   useEffect(()=>{ localStorage.setItem('market', market); }, [market]);
   useEffect(()=>{ localStorage.setItem('live_alerts', live ? '1':'0'); }, [live]);
 
