@@ -172,7 +172,10 @@ function Home() {
       await axios.put(`${API}/profile`, { provider, model }, { headers: { Authorization: `Bearer ${token}` } });
       saveSessionLLM(provider, model, llmKey);
       // save telegram cfg too
-      await axios.post(`${API}/alerts/telegram/config`, { chat_id: tgChatId || null, enabled: tgEnabled, buy_threshold: tgBuy, sell_threshold: tgSell }, { headers: { Authorization: `Bearer ${token}` } });
+      await axios.post(`${API}/alerts/telegram/config`, { chat_id: tgChatId || null, enabled: tgEnabled, buy_threshold: tgBuy, sell_threshold: tgSell, frequency_min: tgFreq, quiet_start_hour: tgQuietStart, quiet_end_hour: tgQuietEnd, timezone: tgTz }, { headers: { Authorization: `Bearer ${token}` } });
+      // save per-symbol thresholds
+      const items = symbols.map(sym => ({ symbol: sym, buy_threshold: thresholdsMap[sym]?.buy_threshold ?? tgBuy, sell_threshold: thresholdsMap[sym]?.sell_threshold ?? tgSell }));
+      await axios.post(`${API}/alerts/thresholds`, { items }, { headers: { Authorization: `Bearer ${token}` } });
       toast.success('Profile saved');
       setProfileOpen(false);
     } catch (e) {
