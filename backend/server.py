@@ -394,6 +394,107 @@ async def signup_v2(req: Dict[str, Any]):
 async def login_v2(req: Dict[str, Any]):
     email = req.get('email'); password = req.get('password')
     user = await db.users.find_one({"email": email})
+
+# ---- Portfolio, Alerts, Search, Analyze, Signal ----
+
+@api_router.get("/search")
+async def search(q: str = Query(..., min_length=1), region: Optional[str] = Query('IN')):
+    try:
+        ql = q.strip().lower()
+        results = []
+        for it in INDIA_TICKERS:
+            sym = it.get('symbol','')
+            name = it.get('name','')
+            if ql in sym.lower() or ql in name.lower():
+                results.append({"symbol": sym, "name": name})
+            if len(results) >= 15:
+                break
+        return {"results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/analyze")
+async def analyze(req: AnalyzeRequest,
+                  llm_key: Optional[str] = Header(default=None, alias='X-LLM-KEY'),
+                  llm_provider: Optional[str] = Header(default='openai', alias='X-LLM-PROVIDER'),
+                  llm_model: Optional[str] = Header(default=None, alias='X-LLM-MODEL')):
+    try:
+        df = await fetch_ohlcv(req.symbol, req.timeframe, req.source)
+        ind = compute_indicators(df)
+        snapshot = ind['snapshot']
+        action = ind['baseline_signal']
+        reasons = ind['baseline_reasons']
+        confidence = ind['baseline_confidence']
+        return {
+            "symbol": req.symbol,
+            "timeframe": req.timeframe,
+            "action": action,
+            "confidence": confidence,
+            "reasons": reasons,
+            "indicators_snapshot": snapshot,
+            "stop_loss": None,
+            "take_profit": None,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/signal/current")
+async def signal_current(symbol: str, timeframe: Literal['weekly','daily','intraday'] = 'weekly', source: Literal['yahoo','msn'] = 'yahoo',
+                         llm_key: Optional[str] = Header(default=None, alias='X-LLM-KEY'),
+                         llm_provider: Optional[str] = Header(default='openai', alias='X-LLM-PROVIDER'),
+                         llm_model: Optional[str] = Header(default=None, alias='X-LLM-MODEL')):
+    req = AnalyzeRequest(symbol=symbol, timeframe=timeframe, market='IN', source=source)
+    return await analyze(req, llm_key=llm_key, llm_provider=llm_provider, llm_model=llm_model)
+
+# ---- Portfolio ----
+@api_router.get("/portfolio/watchlist")
+async def get_watchlist(request: Request):
+    user = await _require_user(request)
+    symbols = user.get('watchlist') or ["RELIANCE.NS","TCS.NS","INFY.NS"]
+    return {"symbols": symbols}
+
+@api_router.put("/portfolio/watchlist")
+async def put_watchlist(request: Request, body: WatchlistUpdate):
+    user = await _require_user(request)
+    await db.users.update_one({"id": user['id']}, {"$set": {"watchlist": body.symbols}})
+    return {"ok": True, "symbols": body.symbols}
+
+# ---- Alerts ----
+@api_router.get("/alerts/telegram/config")
+async def get_tg_cfg(request: Request):
+    user = await _require_user(request)
+    cfg = user.get('alert_settings') or {"enabled": False, "buy_threshold": 80, "sell_threshold": 60, "frequency_min": 60, "quiet_start_hour": 22, "quiet_end_hour": 7, "timezone": 'Asia/Kolkata'}
+    chat_id = cfg.get('chat_id')
+    return {"chat_id": chat_id, **cfg}
+
+@api_router.post("/alerts/telegram/config")
+async def post_tg_cfg(request: Request, cfg: TelegramConfig):
+    user = await _require_user(request)
+    await db.users.update_one({"id": user['id']}, {"$set": {"alert_settings": cfg.model_dump()}})
+    return {"ok": True, **cfg.model_dump()}
+
+@api_router.post("/alerts/telegram/test")
+async def post_tg_test(request: Request, chat_id: Optional[str] = None):
+    _ = await _require_user(request)
+    # Optional: implement telegram send using TELEGRAM_BOT_TOKEN
+    return {"ok": True}
+
+@api_router.get("/alerts/thresholds")
+async def get_thresholds(request: Request):
+    user = await _require_user(request)
+    items = user.get('symbol_thresholds') or {}
+    return {"items": items}
+
+@api_router.post("/alerts/thresholds")
+async def post_thresholds(request: Request, payload: SymbolThresholdsPayload):
+    user = await _require_user(request)
+    mapping = {}
+    for it in payload.items:
+        mapping[it.symbol] = {"buy_threshold": it.buy_threshold, "sell_threshold": it.sell_threshold}
+    await db.users.update_one({"id": user['id']}, {"$set": {"symbol_thresholds": mapping}})
+    return {"ok": True, "items": mapping}
+
     if not user or not pwd_context.verify(password, user.get('password_hash','')):
         raise HTTPException(status_code=401, detail="invalid_credentials")
     token = jwt.encode({"sub": user['id'], "email": email, "exp": datetime.now(timezone.utc)+timedelta(minutes=JWT_EXPIRE_MIN)}, JWT_SECRET, algorithm=JWT_ALGO)
