@@ -48,7 +48,7 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ.get('DB_NAME', 'test_database')]
 
 # App & Router
-app = FastAPI(title="AI Trading Agent API", version="0.5.1")
+app = FastAPI(title="AI Trading Agent API", version="0.5.2")
 api_router = APIRouter(prefix="/api")
 
 # CORS
@@ -142,6 +142,10 @@ class TelegramConfig(BaseModel):
     enabled: bool = True
     buy_threshold: int = 80
     sell_threshold: int = 60
+
+class TestAlertRequest(BaseModel):
+    chat_id: Optional[str] = None
+    text: Optional[str] = Field(default="This is a test alert from TradeSense AI")
 
 # ---------------- Helpers ----------------
 
@@ -479,216 +483,4 @@ async def google_callback(code: Optional[str] = None):
         access_token = token_json.get("access_token")
         if not access_token:
             return JSONResponse({"error": "no_access_token"}, status_code=400)
-        ur = await hx.get("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {access_token}"})
-        if ur.status_code != 200:
-            return JSONResponse({"error": "userinfo_failed"}, status_code=400)
-        userinfo = ur.json()
-    email = userinfo.get("email")
-    if not email:
-        return JSONResponse({"error": "email_not_found"}, status_code=400)
-    existing = await db.users.find_one({"email": email})
-    if not existing:
-        user = {
-            "id": str(uuid.uuid4()),
-            "email": email,
-            "password_hash": "",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "profile": {"provider": "openai", "model": os.environ.get('OPENAI_MODEL', 'gpt-5-mini')},
-            "watchlist": ["RELIANCE.NS", "TCS.NS", "INFY.NS"],
-            "alert_settings": {"enabled": False, "buy_threshold": 80, "sell_threshold": 60},
-        }
-        await db.users.insert_one(user)
-        uid = user['id']
-    else:
-        uid = existing['id']
-    token = create_token(uid, email)
-    return RedirectResponse(url=f"/\u003Ftoken={token}")
-
-# Profile
-@api_router.get("/profile", response_model=Profile)
-async def get_profile(current=Depends(get_current_user)):
-    return Profile(**current.get('profile', {}))
-
-@api_router.put("/profile", response_model=Profile)
-async def update_profile(p: Profile, current=Depends(get_current_user)):
-    await db.users.update_one({"id": current['id']}, {"$set": {"profile": p.model_dump()}})
-    return p
-
-# Portfolio (paper)
-@api_router.get("/portfolio/watchlist")
-async def get_watchlist(current=Depends(get_current_user)):
-    user = await db.users.find_one({"id": current['id']}, {"_id": 0, "watchlist": 1})
-    return {"symbols": user.get('watchlist', []) if user else []}
-
-@api_router.put("/portfolio/watchlist")
-async def put_watchlist(payload: WatchlistUpdate, current=Depends(get_current_user)):
-    await db.users.update_one({"id": current['id']}, {"$set": {"watchlist": payload.symbols}})
-    return {"ok": True}
-
-# Analysis history
-@api_router.get("/portfolio/history")
-async def history(symbol: str, timeframe: str = 'weekly', limit: int = 20, current=Depends(get_current_user)):
-    cursor = db.analysis_history.find({"user_id": current['id'], "symbol": symbol, "timeframe": timeframe}, {"_id": 0}).sort("created_at", -1).limit(limit)
-    return {"items": await cursor.to_list(length=limit)}
-
-# Telegram alerts config
-@api_router.get("/alerts/telegram/config")
-async def get_telegram_cfg(current=Depends(get_current_user)):
-    u = await db.users.find_one({"id": current['id']}, {"_id": 0, "telegram_chat_id": 1, "alert_settings": 1})
-    cfg = u.get('alert_settings', {}) if u else {}
-    return {
-        "chat_id": u.get('telegram_chat_id') if u else None,
-        "enabled": bool(cfg.get('enabled', False)),
-        "buy_threshold": int(cfg.get('buy_threshold', 80)),
-        "sell_threshold": int(cfg.get('sell_threshold', 60)),
-    }
-
-@api_router.post("/alerts/telegram/config")
-async def set_telegram(cfg: TelegramConfig, current=Depends(get_current_user)):
-    await db.users.update_one({"id": current['id']}, {"$set": {"telegram_chat_id": cfg.chat_id, "alert_settings": {"enabled": cfg.enabled, "buy_threshold": cfg.buy_threshold, "sell_threshold": cfg.sell_threshold}}})
-    return {"ok": True}
-
-# Search with offline fallback
-@api_router.get("/search")
-async def search_symbols(q: str = Query(..., min_length=2), region: str = Query('IN')):
-    """Yahoo search with offline India fallback."""
-    url = "https://query1.finance.yahoo.com/v1/finance/search"
-    params = {"q": q, "quotesCount": 10, "newsCount": 0, "listsCount": 0, "enableFuzzyQuery": True, "lang": "en-US", "region": region}
-    headers = {"User-Agent": "Mozilla/5.0"}
-
-    async def offline_in_fallback(query: str) -> Dict[str, Any]:
-        try:
-            path = ROOT_DIR / 'data' / 'india_tickers.json'
-            with open(path, 'r') as f:
-                items = json.load(f)
-            Q = query.lower()
-            filtered = [it for it in items if Q in it['symbol'].lower() or Q in it['name'].lower()]
-            return {"results": filtered[:10]}
-        except Exception as e:
-            logger.exception("Offline fallback failed: %s", e)
-            return {"results": []}
-
-    try:
-        async with httpx.AsyncClient(timeout=10) as client_hx:
-            r = await client_hx.get(url, params=params, headers=headers)
-            if r.status_code == 200:
-                data = r.json() or {}
-                quotes = data.get("quotes", [])
-                out = []
-                for qd in quotes:
-                    sym = qd.get("symbol")
-                    nm = qd.get("shortname") or qd.get("longname") or qd.get("name")
-                    exch = qd.get("exchDisp") or qd.get("exchange")
-                    typ = qd.get("quoteType") or qd.get("typeDisp")
-                    if not sym or not nm:
-                        continue
-                    if region.upper() == 'IN' and (sym.endswith('.NS') or sym.endswith('.BO')):
-                        out.append({"symbol": sym, "name": nm, "exchange": exch, "type": typ})
-                    elif region.upper() != 'IN':
-                        out.append({"symbol": sym, "name": nm, "exchange": exch, "type": typ})
-                dedup = {it['symbol']: it for it in out}
-                if region.upper() == 'IN' and len(dedup) == 0:
-                    return await offline_in_fallback(q)
-                return {"results": list(dedup.values())[:10]}
-            if region.upper() == 'IN':
-                return await offline_in_fallback(q)
-            raise HTTPException(status_code=502, detail="Search service unavailable")
-    except Exception:
-        if region.upper() == 'IN':
-            return await offline_in_fallback(q)
-        raise HTTPException(status_code=502, detail="Search service unavailable")
-
-# Analysis
-@api_router.post("/analyze", response_model=AIRecommendation)
-async def analyze(req: AnalyzeRequest,
-                  request: Request,
-                  llm_key: Optional[str] = Header(default=None, alias='X-LLM-KEY'),
-                  llm_provider: Optional[str] = Header(default='openai', alias='X-LLM-PROVIDER'),
-                  llm_model: Optional[str] = Header(default=None, alias='X-LLM-MODEL')):
-    symbol = req.symbol.strip()
-    df = await fetch_ohlcv(symbol, req.timeframe)
-    indicators = compute_indicators(df)
-    rec = await call_llm(llm_provider, llm_model, llm_key, symbol, req.timeframe, indicators)
-    if not rec.indicators_snapshot:
-        rec.indicators_snapshot = indicators['snapshot']
-    # Save history if JWT present
-    auth = request.headers.get('Authorization')
-    if auth and auth.lower().startswith('bearer '):
-        try:
-            payload = jwt.decode(auth.split(' ',1)[1], JWT_SECRET, algorithms=[JWT_ALGO])
-            uid = payload.get('sub')
-            if uid:
-                doc = {
-                    "user_id": uid,
-                    "symbol": rec.symbol,
-                    "timeframe": rec.timeframe,
-                    "recommendation": rec.model_dump(),
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                }
-                await db.analysis_history.insert_one(doc)
-        except Exception:
-            pass
-    return rec
-
-@api_router.get("/signal/current", response_model=AIRecommendation)
-async def current_signal(symbol: str = Query(...), timeframe: Literal['weekly','daily','intraday'] = 'weekly',
-                         llm_key: Optional[str] = Header(default=None, alias='X-LLM-KEY'),
-                         llm_provider: Optional[str] = Header(default='openai', alias='X-LLM-PROVIDER'),
-                         llm_model: Optional[str] = Header(default=None, alias='X-LLM-MODEL')):
-    df = await fetch_ohlcv(symbol.strip(), timeframe)
-    indicators = compute_indicators(df)
-    rec = await call_llm(llm_provider, llm_model, llm_key, symbol.strip(), timeframe, indicators)
-    if not rec.indicators_snapshot:
-        rec.indicators_snapshot = indicators['snapshot']
-    return rec
-
-# Include router
-app.include_router(api_router)
-
-# ---------------- Alerts background (heuristics-based) ----------------
-async def alerts_loop():
-    if not TELEGRAM_BOT_TOKEN:
-        logger.info("Telegram bot token not configured; alerts disabled")
-        return
-    send_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    while True:
-        try:
-            users = db.users.find({"alert_settings.enabled": True, "telegram_chat_id": {"$exists": True}})
-            async for u in users:
-                chat_id = u.get('telegram_chat_id')
-                settings = u.get('alert_settings', {})
-                buy_th = int(settings.get('buy_threshold', 80))
-                sell_th = int(settings.get('sell_threshold', 60))
-                watch = u.get('watchlist', [])[:20]
-                for sym in watch:
-                    try:
-                        df = await fetch_ohlcv(sym, 'weekly')
-                        indicators = compute_indicators(df)
-                        conf = indicators.get('baseline_confidence', 60)
-                        action = indicators.get('baseline_signal', 'hold')
-                        trigger = (action == 'buy' and conf >= buy_th) or (action == 'sell' and conf >= sell_th)
-                        if not trigger:
-                            continue
-                        last_map = u.get('last_alerts', {})
-                        key = f"{sym}_weekly"
-                        last_entry = last_map.get(key)
-                        if last_entry and last_entry.get('action') == action and (datetime.now(timezone.utc).timestamp() - last_entry.get('ts', 0)) < 3600:
-                            continue
-                        text = f"Signal {action.upper()} for {sym} (weekly)\nConfidence: {conf}%\nReason: {'; '.join(indicators.get('baseline_reasons', [])[:3])}"
-                        async with httpx.AsyncClient(timeout=10) as hx:
-                            await hx.post(send_url, json={"chat_id": chat_id, "text": text})
-                        last_map[key] = {"action": action, "ts": datetime.now(timezone.utc).timestamp()}
-                        await db.users.update_one({"id": u['id']}, {"$set": {"last_alerts": last_map}})
-                    except Exception:
-                        continue
-        except Exception as e:
-            logger.exception("alerts loop error: %s", e)
-        await asyncio.sleep(300)
-
-@app.on_event("startup")
-async def start_alerts():
-    asyncio.create_task(alerts_loop())
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
+        ur = await hx.get("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {access_token}```
