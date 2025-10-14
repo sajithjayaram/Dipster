@@ -355,6 +355,14 @@ async def google_callback(code: Optional[str] = None, error: Optional[str] = Non
             "watchlist": ["RELIANCE.NS", "TCS.NS", "INFY.NS"],
             "alert_settings": {"enabled": False, "buy_threshold": 80, "sell_threshold": 60, "frequency_min": 60, "quiet_start_hour": 22, "quiet_end_hour": 7, "timezone": 'Asia/Kolkata'},
             "symbol_thresholds": {},
+        }
+        await db.users.insert_one(user)
+        uid = user['id']
+    else:
+        uid = existing['id']
+    token = create_token(uid, email)
+    return RedirectResponse(url=f"/?token={token}")
+
 # ---- Auth and profile routes ----
 @api_router.post("/auth/signup")
 async def signup_v2(req: Dict[str, Any]):
