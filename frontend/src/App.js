@@ -60,6 +60,13 @@ function Home() {
   const [tgChatId, setTgChatId] = useState('');
   const [tgBuy, setTgBuy] = useState(80);
   const [tgSell, setTgSell] = useState(60);
+  const [tgFreq, setTgFreq] = useState(60);
+  const [tgQuietStart, setTgQuietStart] = useState(22);
+  const [tgQuietEnd, setTgQuietEnd] = useState(7);
+  const [tgTz, setTgTz] = useState('Asia/Kolkata');
+
+  // per-symbol thresholds
+  const [thresholdsMap, setThresholdsMap] = useState({}); // { SYM: {buy_threshold, sell_threshold} }
 
   // search state
   const [query, setQuery] = useState('');
