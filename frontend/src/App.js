@@ -210,7 +210,7 @@ function Home() {
     if (!llmKey) { toast.error('Set your API key in Profile'); return; }
     setLoadingMap(m => ({ ...m, [s]: true }));
     try {
-      const res = await axios.post(`${API}/analyze`, { symbol: s, timeframe, market }, {
+      const res = await axios.post(`${API}/analyze`, { symbol: s, timeframe, market, source }, {
         headers: {
           'X-LLM-KEY': llmKey,
           'X-LLM-PROVIDER': provider,
