@@ -321,7 +321,18 @@ function Home() {
                       </div>
                     </div>
                     <DialogFooter>
-                      <Button onClick={saveProfile} className="btn-primary" data-testid="save-profile-button">Save</Button>
+                      <div style={{ display:'flex', gap:10 }}>
+                        <Button onClick={saveProfile} className="btn-primary" data-testid="save-profile-button">Save</Button>
+                        <Button variant="outline" onClick={async()=>{
+                          if(!token){ toast.error('Login required'); return; }
+                          try{
+                            await axios.post(`${API}/alerts/telegram/test`, { chat_id: tgChatId || undefined }, { headers: { Authorization: `Bearer ${token}` } });
+                            toast.success('Test alert sent');
+                          }catch(e){
+                            toast.error(e?.response?.data?.detail || 'Failed to send test alert');
+                          }
+                        }} data-testid="send-test-alert-button">Send test alert</Button>
+                      </div>
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
