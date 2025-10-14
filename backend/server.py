@@ -154,14 +154,14 @@ class TestAlertRequest(BaseModel):
 class StrategyFilters(BaseModel):
     risk_tolerance: Literal['low', 'medium', 'high'] = 'medium'
     horizon: Literal['intraday', 'daily', 'weekly', 'longterm'] = 'weekly'
-    asset_classes: List[Literal['stocks','etfs','commodities','mutual_funds']] = Field(default_factory=lambda: ['stocks','etfs'])
+    asset_classes: List[Literal['stocks']] = Field(default_factory=lambda: ['stocks'])
     market: Literal['IN'] = 'IN'
     momentum_preference: bool = True
     value_preference: bool = False
     rsi_min: Optional[int] = None
     rsi_max: Optional[int] = None
     sectors: Optional[List[str]] = None
-    allocation: Dict[str, int] = Field(default_factory=lambda: {"stocks": 60, "etfs": 20, "commodities": 20})
+    allocation: Dict[str, int] = Field(default_factory=lambda: {"stocks": 100})
 
 class StrategyRequest(BaseModel):
     filters: StrategyFilters
