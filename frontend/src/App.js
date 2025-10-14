@@ -41,7 +41,7 @@ function Home() {
   const [recs, setRecs] = useState({});
 
   // auth state
-  const [token, setToken] = useState(() => sessionStorage.getItem('token') || '');
+  const [token, setToken] = useState(() => localStorage.getItem('token') || '');
   const [email, setEmail] = useState('');
   const [authOpen, setAuthOpen] = useState(false);
   const [isSignup, setIsSignup] = useState(false);
@@ -50,9 +50,9 @@ function Home() {
 
   // profile state (provider/model) and per-session key
   const [profileOpen, setProfileOpen] = useState(false);
-  const [provider, setProvider] = useState(() => sessionStorage.getItem('llm_provider') || 'openai');
-  const [model, setModel] = useState(() => sessionStorage.getItem('llm_model') || 'gpt-5-mini');
-  const [llmKey, setLlmKey] = useState(() => sessionStorage.getItem('llm_key') || '');
+  const [provider, setProvider] = useState(() => localStorage.getItem('llm_provider') || 'openai');
+  const [model, setModel] = useState(() => localStorage.getItem('llm_model') || 'gpt-5-mini');
+  const [llmKey, setLlmKey] = useState(() => localStorage.getItem('llm_key') || '');
 
   // telegram settings
   const [tgEnabled, setTgEnabled] = useState(false);
@@ -74,14 +74,14 @@ function Home() {
   const loadedWatchlistOnce = useRef(false);
 
   const setSession = (t) => {
-    if (t) { sessionStorage.setItem('token', t); setToken(t); }
-    else { sessionStorage.removeItem('token'); setToken(''); }
+    if (t) { localStorage.setItem('token', t); setToken(t); }
+    else { localStorage.removeItem('token'); setToken(''); }
   };
 
   const saveSessionLLM = (prov, mdl, key) => {
-    if (prov) { sessionStorage.setItem('llm_provider', prov); setProvider(prov); }
-    if (mdl) { sessionStorage.setItem('llm_model', mdl); setModel(mdl); }
-    if (key !== undefined) { sessionStorage.setItem('llm_key', key); setLlmKey(key); }
+    if (prov) { localStorage.setItem('llm_provider', prov); setProvider(prov); }
+    if (mdl) { localStorage.setItem('llm_model', mdl); setModel(mdl); }
+    if (key !== undefined) { localStorage.setItem('llm_key', key); setLlmKey(key); }
   };
 
   // Capture JWT from Google callback (?token=...)
