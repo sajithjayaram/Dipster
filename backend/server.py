@@ -484,3 +484,27 @@ async def google_callback(code: Optional[str] = None):
         if not access_token:
             return JSONResponse({"error": "no_access_token"}, status_code=400)
         ur = await hx.get("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {access_token}"})
+
+        if ur.status_code != 200:
+            return JSONResponse({"error": "userinfo_failed"}, status_code=400)
+        userinfo = ur.json()
+    email = userinfo.get("email")
+    if not email:
+        return JSONResponse({"error": "email_not_found"}, status_code=400)
+    existing = await db.users.find_one({"email": email})
+    if not existing:
+        user = {
+            "id": str(uuid.uuid4()),
+            "email": email,
+            "password_hash": "",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "profile": {"provider": "openai", "model": os.environ.get('OPENAI_MODEL', 'gpt-5-mini')},
+            "watchlist": ["RELIANCE.NS", "TCS.NS", "INFY.NS"],
+            "alert_settings": {"enabled": False, "buy_threshold": 80, "sell_threshold": 60},
+        }
+        await db.users.insert_one(user)
+        uid = user['id']
+    else:
+        uid = existing['id']
+    token = create_token(uid, email)
+    return RedirectResponse(url=f"/\u003Ftoken={token}")
