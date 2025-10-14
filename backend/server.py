@@ -24,6 +24,7 @@ import yfinance as yf
 import httpx
 import json
 from zoneinfo import ZoneInfo
+from urllib.parse import urlencode
 
 # Auth deps
 from passlib.context import CryptContext
