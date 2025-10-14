@@ -242,6 +242,31 @@ function Home() {
       setRecs(prev => ({ ...prev, [s]: res.data }));
     } catch { /* silent */ }
   };
+                      <Separator />
+                      <div className="grid" style={{ gap: 10 }}>
+                        <Label className="text-sm">Global Alert Window</Label>
+                        <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                          <div>
+                            <Label className="text-sm">Min gap (minutes)</Label>
+                            <Input data-testid="tg-frequency-input" type="number" min={5} max={1440} value={tgBuy /* temp reuse var for UI? better add dedicated state */} />
+                          </div>
+                        </div>
+                        <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                          <div>
+                            <Label className="text-sm">Quiet start hour</Label>
+                            <Input data-testid="tg-quiet-start-input" type="number" min={0} max={23} placeholder="22" />
+                          </div>
+                          <div>
+                            <Label className="text-sm">Quiet end hour</Label>
+                            <Input data-testid="tg-quiet-end-input" type="number" min={0} max={23} placeholder="7" />
+                          </div>
+                          <div>
+                            <Label className="text-sm">Timezone</Label>
+                            <Input data-testid="tg-timezone-input" placeholder="Asia/Kolkata" />
+                          </div>
+                        </div>
+                      </div>
+
 
   const startPoll = useMemo(() => () => { symbols.forEach(s => pollOne(s)); }, [symbols, timeframe, provider, model, llmKey, token]);
   usePolling(live, startPoll, 60000);
