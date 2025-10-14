@@ -197,6 +197,35 @@ def compute_indicators(df: pd.DataFrame) -> Dict[str, Any]:
 # ---------------- Strategy helpers ----------------
 async def build_universe(filters: StrategyFilters, limit: int = 80) -> List[Dict[str,str]]:
     # India-only: start from sector mapping if available, fallback to tickers list
+    out: List[Dict[str,str]] = []
+    if filters.sectors:
+        # use INDIA_SECTORS to gather all matching sectors
+        wanted = set(filters.sectors)
+        for sym, meta in INDIA_SECTORS.items():
+            if meta.get('sector') in wanted:
+                out.append({"symbol": sym, "name": meta.get('name'), "sector": meta.get('sector'), "cap": meta.get('cap')})
+    else:
+        # general list limited
+        for it in INDIA_TICKERS[:50]:
+            sym = it.get('symbol');
+            meta = INDIA_SECTORS.get(sym, {})
+            out.append({"symbol": sym, "name": it.get('name'), "sector": meta.get('sector'), "cap": meta.get('cap')})
+    # Dedup and cap
+    seen = set(); dedup = []
+    for it in out:
+        sym = it.get('symbol');
+        if not sym or sym in seen: continue
+        seen.add(sym); dedup.append(it)
+    return dedup[:limit]
+
+def create_token(uid: str, email: str) -> str:
+    """Create JWT token for user authentication"""
+    payload = {
+        "sub": uid,
+        "email": email,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MIN)
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
 
 # --------------- Google OAuth routes ---------------
 @api_router.get("/auth/google/login")
