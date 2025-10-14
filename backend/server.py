@@ -104,6 +104,37 @@ class StrategyFilters(BaseModel):
     momentum_preference: bool = True
     value_preference: bool = False
     rsi_min: Optional[int] = None
+# ---- Core user/profile models ----
+class Profile(BaseModel):
+    provider: Literal['openai', 'anthropic', 'gemini'] = 'openai'
+    model: Optional[str] = Field(default=os.environ.get('OPENAI_MODEL', 'gpt-5-mini'))
+
+class UserOut(BaseModel):
+    id: str
+    email: EmailStr
+    profile: Profile
+
+class WatchlistUpdate(BaseModel):
+    symbols: List[str]
+
+class TelegramConfig(BaseModel):
+    chat_id: Optional[str] = None
+    enabled: bool = False
+    buy_threshold: int = 80
+    sell_threshold: int = 60
+    frequency_min: int = 60
+    quiet_start_hour: int = 22
+    quiet_end_hour: int = 7
+    timezone: str = 'Asia/Kolkata'
+
+class SymbolThreshold(BaseModel):
+    symbol: str
+    buy_threshold: int
+    sell_threshold: int
+
+class SymbolThresholdsPayload(BaseModel):
+    items: List[SymbolThreshold]
+
     rsi_max: Optional[int] = None
     sectors: Optional[List[Literal['IT','Banking','Auto','Pharma','FMCG','Energy','Metals']]] = None
     allocation: Dict[str, int] = Field(default_factory=lambda: {"stocks": 100})
