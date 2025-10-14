@@ -104,6 +104,10 @@ class StrategyFilters(BaseModel):
     momentum_preference: bool = True
     value_preference: bool = False
     rsi_min: Optional[int] = None
+    rsi_max: Optional[int] = None
+    sectors: Optional[List[Literal['IT','Banking','Auto','Pharma','FMCG','Energy','Metals']]] = None
+    allocation: Dict[str, int] = Field(default_factory=lambda: {"stocks": 100})
+    caps_allocation: Dict[Literal['largecap','midcap','smallcap'], int] = Field(default_factory=lambda: {"largecap": 60, "midcap": 25, "smallcap": 15})
 # ---- Core user/profile models ----
 class Profile(BaseModel):
     provider: Literal['openai', 'anthropic', 'gemini'] = 'openai'
