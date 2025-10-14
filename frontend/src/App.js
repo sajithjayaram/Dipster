@@ -592,10 +592,7 @@ function Home() {
                 <div>
                   <Label className="text-sm">Asset classes</Label>
                   <div className="list">
-                    <span className="chip" data-testid="asset-stocks" onClick={()=>setAssetStocks(v=>!v)} style={{ background: assetStocks? '#0ea5a4' : undefined, color: assetStocks? '#fff' : undefined }}>Stocks</span>
-                    <span className="chip" data-testid="asset-etfs" onClick={()=>setAssetETFs(v=>!v)} style={{ background: assetETFs? '#0ea5a4' : undefined, color: assetETFs? '#fff' : undefined }}>ETFs</span>
-                    <span className="chip" data-testid="asset-comms" onClick={()=>setAssetComms(v=>!v)} style={{ background: assetComms? '#0ea5a4' : undefined, color: assetComms? '#fff' : undefined }}>Commodities</span>
-                    <span className="chip" data-testid="asset-mfs" onClick={()=>setAssetMFs(v=>!v)} style={{ background: assetMFs? '#0ea5a4' : undefined, color: assetMFs? '#fff' : undefined }}>Mutual Funds</span>
+                    <span className="chip" data-testid="asset-stocks" style={{ background: '#0ea5a4', color: '#fff', cursor:'default' }}>Stocks</span>
                   </div>
                 </div>
               </div>
