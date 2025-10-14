@@ -155,7 +155,7 @@ class StrategyFilters(BaseModel):
     risk_tolerance: Literal['low', 'medium', 'high'] = 'medium'
     horizon: Literal['intraday', 'daily', 'weekly', 'longterm'] = 'weekly'
     asset_classes: List[Literal['stocks','etfs','commodities','mutual_funds']] = Field(default_factory=lambda: ['stocks','etfs'])
-    market: Literal['IN','US'] = 'IN'
+    market: Literal['IN'] = 'IN'
     momentum_preference: bool = True
     value_preference: bool = False
     rsi_min: Optional[int] = None
