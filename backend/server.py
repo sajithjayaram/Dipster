@@ -198,6 +198,75 @@ def compute_indicators(df: pd.DataFrame) -> Dict[str, Any]:
 # ---------------- Strategy helpers ----------------
 async def build_universe(filters: StrategyFilters, limit: int = 80) -> List[Dict[str,str]]:
     # India-only: start from sector mapping if available, fallback to tickers list
+
+# --------------- Google OAuth routes ---------------
+@api_router.get("/auth/google/login")
+async def google_login():
+    if not GOOGLE_CLIENT_ID or not GOOGLE_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="google_oauth_not_configured")
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "online",
+        "prompt": "consent",
+    }
+    url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+    return RedirectResponse(url)
+
+@api_router.get("/auth/google/callback")
+async def google_callback(code: Optional[str] = None, error: Optional[str] = None):
+    def fail(msg: str):
+        logger.warning(f"google_oauth_error: {msg}")
+        return RedirectResponse(url=f"/?oauth_error={msg}")
+    if error:
+        return fail(error)
+    if not code:
+        return fail("missing_code")
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET or not GOOGLE_REDIRECT_URI:
+        return fail("google_oauth_not_configured")
+    token_data = {
+        "code": code,
+        "client_id": GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "grant_type": "authorization_code",
+    }
+    async with httpx.AsyncClient(timeout=15) as hx:
+        tr = await hx.post("https://oauth2.googleapis.com/token", data=token_data)
+        if tr.status_code != 200:
+            return fail("token_exchange_failed")
+        token_json = tr.json()
+        access_token = token_json.get("access_token")
+        if not access_token:
+            return fail("no_access_token")
+        ur = await hx.get("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {access_token}"})
+        if ur.status_code != 200:
+            return fail("userinfo_failed")
+        userinfo = ur.json()
+    email = userinfo.get("email")
+    if not email:
+        return fail("email_not_found")
+    existing = await db.users.find_one({"email": email})
+    if not existing:
+        user = {
+            "id": str(uuid.uuid4()),
+            "email": email,
+            "password_hash": "",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "profile": {"provider": "openai", "model": os.environ.get('OPENAI_MODEL', 'gpt-5-mini')},
+            "watchlist": ["RELIANCE.NS", "TCS.NS", "INFY.NS"],
+            "alert_settings": {"enabled": False, "buy_threshold": 80, "sell_threshold": 60, "frequency_min": 60, "quiet_start_hour": 22, "quiet_end_hour": 7, "timezone": 'Asia/Kolkata'},
+            "symbol_thresholds": {},
+        }
+        await db.users.insert_one(user)
+        uid = user['id']
+    else:
+        uid = existing['id']
+    token = create_token(uid, email)
+    return RedirectResponse(url=f"/\u003Ftoken={token}")
+
     out: List[Dict[str,str]] = []
     if filters.sectors:
         # use INDIA_SECTORS to gather all matching sectors
