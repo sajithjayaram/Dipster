@@ -318,6 +318,78 @@ async def google_callback(code: Optional[str] = None, error: Optional[str] = Non
             "watchlist": ["RELIANCE.NS", "TCS.NS", "INFY.NS"],
             "alert_settings": {"enabled": False, "buy_threshold": 80, "sell_threshold": 60, "frequency_min": 60, "quiet_start_hour": 22, "quiet_end_hour": 7, "timezone": 'Asia/Kolkata'},
             "symbol_thresholds": {},
+# ---- Auth and profile routes ----
+@api_router.post("/auth/signup")
+async def signup_v2(req: Dict[str, Any]):
+    email = req.get('email'); password = req.get('password')
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="missing_credentials")
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        raise HTTPException(status_code=400, detail="email_in_use")
+    user = {
+        "id": str(uuid.uuid4()),
+        "email": email,
+        "password_hash": pwd_context.hash(password),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "profile": {"provider": "openai", "model": os.environ.get('OPENAI_MODEL','gpt-5-mini')},
+        "watchlist": ["RELIANCE.NS","TCS.NS","INFY.NS"],
+        "alert_settings": {"enabled": False, "buy_threshold": 80, "sell_threshold": 60, "frequency_min": 60, "quiet_start_hour": 22, "quiet_end_hour": 7, "timezone": 'Asia/Kolkata'},
+        "symbol_thresholds": {},
+    }
+    await db.users.insert_one(user)
+    token = jwt.encode({"sub": user['id'], "email": email, "exp": datetime.now(timezone.utc)+timedelta(minutes=JWT_EXPIRE_MIN)}, JWT_SECRET, algorithm=JWT_ALGO)
+    return {"access_token": token, "token_type": "bearer"}
+
+@api_router.post("/auth/login")
+async def login_v2(req: Dict[str, Any]):
+    email = req.get('email'); password = req.get('password')
+    user = await db.users.find_one({"email": email})
+    if not user or not pwd_context.verify(password, user.get('password_hash','')):
+        raise HTTPException(status_code=401, detail="invalid_credentials")
+    token = jwt.encode({"sub": user['id'], "email": email, "exp": datetime.now(timezone.utc)+timedelta(minutes=JWT_EXPIRE_MIN)}, JWT_SECRET, algorithm=JWT_ALGO)
+    return {"access_token": token, "token_type": "bearer"}
+
+@api_router.get("/auth/me")
+async def me_v2(request: Request):
+    auth = request.headers.get('Authorization')
+    if not auth or not auth.lower().startswith('bearer '):
+        raise HTTPException(status_code=401, detail="missing_or_invalid_token")
+    token = auth.split(' ',1)[1]
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+        uid = payload.get('sub')
+        user = await db.users.find_one({"id": uid})
+        if not user:
+            raise HTTPException(status_code=404, detail="user_not_found")
+        return {"id": user['id'], "email": user['email'], "profile": user.get('profile', {"provider":"openai","model": os.environ.get('OPENAI_MODEL','gpt-5-mini')})}
+    except JWTError:
+        raise HTTPException(status_code=401, detail="invalid_token")
+
+@api_router.get("/profile")
+async def get_profile_v2(request: Request):
+    auth = request.headers.get('Authorization')
+    if not auth or not auth.lower().startswith('bearer '):
+        raise HTTPException(status_code=401, detail="missing_or_invalid_token")
+    token = auth.split(' ',1)[1]
+    payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+    uid = payload.get('sub')
+    user = await db.users.find_one({"id": uid})
+    if not user:
+        raise HTTPException(status_code=404, detail="user_not_found")
+    return user.get('profile', {"provider":"openai","model": os.environ.get('OPENAI_MODEL','gpt-5-mini')})
+
+@api_router.put("/profile")
+async def put_profile_v2(request: Request, p: Dict[str, Any]):
+    auth = request.headers.get('Authorization')
+    if not auth or not auth.lower().startswith('bearer '):
+        raise HTTPException(status_code=401, detail="missing_or_invalid_token")
+    token = auth.split(' ',1)[1]
+    payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+    uid = payload.get('sub')
+    await db.users.update_one({"id": uid}, {"$set": {"profile": p}})
+    return p
+
         }
         await db.users.insert_one(user)
         uid = user['id']
