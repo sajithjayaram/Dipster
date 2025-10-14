@@ -12,7 +12,8 @@ import { Separator } from './components/ui/separator.jsx';
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from './components/ui/command.jsx';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from './components/ui/dialog.jsx';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './components/ui/tabs.jsx';
-import { BarChart3, Activity, AlertTriangle, Search, User, LogIn } from 'lucide-react';
+import { Textarea } from './components/ui/textarea.jsx';
+import { BarChart3, Activity, AlertTriangle, Search, User, LogIn, Wand2 } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -66,17 +67,23 @@ function Home() {
   const [tgTz, setTgTz] = useState('Asia/Kolkata');
 
   // per-symbol thresholds
-  const [thresholdsMap, setThresholdsMap] = useState({}); // { SYM: {buy_threshold, sell_threshold} }
+  const [thresholdsMap, setThresholdsMap] = useState({});
 
-  // search state
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [openSearch, setOpenSearch] = useState(false);
-  const debounceRef = useRef(null);
-
-  // history state
-  const [activeTab, setActiveTab] = useState('current');
-  const [historyMap, setHistoryMap] = useState({}); // { `${symbol}-${timeframe}`: items[] }
+  // Strategy builder state
+  const [risk, setRisk] = useState('medium');
+  const [horizon, setHorizon] = useState('weekly');
+  const [momentum, setMomentum] = useState(true);
+  const [value, setValue] = useState(false);
+  const [rsiMin, setRsiMin] = useState('');
+  const [rsiMax, setRsiMax] = useState('');
+  const [assetStocks, setAssetStocks] = useState(true);
+  const [assetETFs, setAssetETFs] = useState(true);
+  const [assetComms, setAssetComms] = useState(true);
+  const [assetMFs, setAssetMFs] = useState(false);
+  const [freePrompt, setFreePrompt] = useState('');
+  const [topN, setTopN] = useState(5);
+  const [picks, setPicks] = useState([]);
+  const [picking, setPicking] = useState(false);
 
   const isAuthed = !!token;
   const loadedWatchlistOnce = useRef(false);
@@ -102,6 +109,13 @@ function Home() {
       toast.success('Logged in with Google');
     }
   }, []);
+
+  // persist preferences
+  useEffect(()=>{ try{ localStorage.setItem('symbols', JSON.stringify(symbols)); }catch{} }, [symbols]);
+  useEffect(()=>{ localStorage.setItem('timeframe', timeframe); }, [timeframe]);
+  useEffect(()=>{ localStorage.setItem('market', market); }, [market]);
+  useEffect(()=>{ localStorage.setItem('data_source', source); }, [source]);
+  useEffect(()=>{ localStorage.setItem('live_alerts', live ? '1':'0'); }, [live]);
 
   // ------- AUTH -------
   const fetchMe = async (tok) => {
@@ -137,14 +151,14 @@ function Home() {
     } catch { /* ignore */ }
   };
 
-  useEffect(() => { if (token) { fetchMe(token); fetchWatchlist(token); fetchTelegramCfg(token); fetchThresholds(token); } }, [token]);
-
   const fetchThresholds = async (tok) => {
     try{
       const res = await axios.get(`${API}/alerts/thresholds`, { headers: { Authorization: `Bearer ${tok}` } });
       setThresholdsMap(res.data?.items || {});
     }catch{}
   };
+
+  useEffect(() => { if (token) { fetchMe(token); fetchWatchlist(token); fetchTelegramCfg(token); fetchThresholds(token); } }, [token]);
 
   const handleAuth = async () => {
     if (!authEmail || !authPassword) { toast.error('Enter email and password'); return; }
@@ -171,9 +185,7 @@ function Home() {
     try {
       await axios.put(`${API}/profile`, { provider, model }, { headers: { Authorization: `Bearer ${token}` } });
       saveSessionLLM(provider, model, llmKey);
-      // save telegram cfg too
       await axios.post(`${API}/alerts/telegram/config`, { chat_id: tgChatId || null, enabled: tgEnabled, buy_threshold: tgBuy, sell_threshold: tgSell, frequency_min: tgFreq, quiet_start_hour: tgQuietStart, quiet_end_hour: tgQuietEnd, timezone: tgTz }, { headers: { Authorization: `Bearer ${token}` } });
-      // save per-symbol thresholds
       const items = symbols.map(sym => ({ symbol: sym, buy_threshold: thresholdsMap[sym]?.buy_threshold ?? tgBuy, sell_threshold: thresholdsMap[sym]?.sell_threshold ?? tgSell }));
       await axios.post(`${API}/alerts/thresholds`, { items }, { headers: { Authorization: `Bearer ${token}` } });
       toast.success('Profile saved');
@@ -184,6 +196,11 @@ function Home() {
   };
 
   // ------- SEARCH -------
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [openSearch, setOpenSearch] = useState(false);
+  const debounceRef = useRef(null);
+
   const fetchSearch = useCallback((q) => {
     if (!q || q.length < 2) { setResults([]); return; }
     axios.get(`${API}/search`, { params: { q, region: market } })
@@ -204,7 +221,6 @@ function Home() {
     setSymbols(next);
     setQuery(''); setResults([]); setOpenSearch(false);
     toast.success(`${S} added`);
-    // persist server-side if authed
     if (isAuthed && loadedWatchlistOnce.current) {
       axios.put(`${API}/portfolio/watchlist`, { symbols: next }, { headers: { Authorization: `Bearer ${token}` } }).catch(()=>{});
     }
@@ -220,14 +236,6 @@ function Home() {
 
   // ------- ANALYZE -------
   const analyze = async (s) => {
-  // persist preferences
-  useEffect(()=>{ try{ localStorage.setItem('symbols', JSON.stringify(symbols)); }catch{} }, [symbols]);
-  useEffect(()=>{ localStorage.setItem('timeframe', timeframe); }, [timeframe]);
-  useEffect(()=>{ localStorage.setItem('data_source', source); }, [source]);
-
-  useEffect(()=>{ localStorage.setItem('market', market); }, [market]);
-  useEffect(()=>{ localStorage.setItem('live_alerts', live ? '1':'0'); }, [live]);
-
     if (!llmKey) { toast.error('Set your API key in Profile'); return; }
     setLoadingMap(m => ({ ...m, [s]: true }));
     try {
@@ -263,63 +271,51 @@ function Home() {
       setRecs(prev => ({ ...prev, [s]: res.data }));
     } catch { /* silent */ }
   };
-                      <Separator />
-                      <div className="grid" style={{ gap: 10 }}>
-                        <Label className="text-sm">Global Alert Window</Label>
-                      <div className="grid" style={{ gap: 8 }}>
-                        <Label className="text-sm">Per-symbol thresholds</Label>
-                        <div className="text-xs text-slate-500">Click a value to edit. Unset values fall back to global thresholds.</div>
-                        <div className="panel" style={{ padding: 10 }}>
-                          {symbols.map(sym => (
-                            <div key={sym} style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap: 10, alignItems:'center', marginBottom: 6 }}>
-                              <div style={{ fontWeight:600 }}>{sym}</div>
-                              <Input data-testid={`sym-${sym}-buy`} type="number" min={0} max={100} value={thresholdsMap[sym]?.buy_threshold ?? ''} placeholder={`Buy ≥ ${tgBuy}`} onChange={e=> setThresholdsMap(prev=> ({ ...prev, [sym]: { ...(prev[sym]||{}), buy_threshold: e.target.value? parseInt(e.target.value,10): undefined } })) } />
-                              <Input data-testid={`sym-${sym}-sell`} type="number" min={0} max={100} value={thresholdsMap[sym]?.sell_threshold ?? ''} placeholder={`Sell ≥ ${tgSell}`} onChange={e=> setThresholdsMap(prev=> ({ ...prev, [sym]: { ...(prev[sym]||{}), sell_threshold: e.target.value? parseInt(e.target.value,10): undefined } })) } />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
 
-                        <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                          <div>
-                            <Label className="text-sm">Min gap (minutes)</Label>
-                            <Input data-testid="tg-frequency-input" type="number" min={5} max={1440} value={tgBuy /* temp reuse var for UI? better add dedicated state */} />
-                          </div>
-                        </div>
-                        <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                          <div>
-                            <Label className="text-sm">Quiet start hour</Label>
-                            <Input data-testid="tg-quiet-start-input" type="number" min={0} max={23} placeholder="22" />
-                          </div>
-                          <div>
-                            <Label className="text-sm">Quiet end hour</Label>
-                            <Input data-testid="tg-quiet-end-input" type="number" min={0} max={23} placeholder="7" />
-                          </div>
-                          <div>
-                            <Label className="text-sm">Timezone</Label>
-                            <Input data-testid="tg-timezone-input" placeholder="Asia/Kolkata" />
-                          </div>
-                        </div>
-                      </div>
-
-
-  const startPoll = useMemo(() => () => { symbols.forEach(s => pollOne(s)); }, [symbols, timeframe, provider, model, llmKey, token]);
+  const startPoll = useMemo(() => () => { symbols.forEach(s => pollOne(s)); }, [symbols, timeframe, provider, model, llmKey, token, source]);
   usePolling(live, startPoll, 60000);
 
   useEffect(() => { symbols.forEach(s => analyze(s)); }, []);
 
-  const openGoogleLogin = () => {
-    window.location.href = `${API}/auth/google/login`;
-  };
+  const openGoogleLogin = () => { window.location.href = `${API}/auth/google/login`; };
 
-  const fetchHistory = async (s) => {
-    if (!isAuthed) return;
-    const key = `${s}-${timeframe}`;
-    if (historyMap[key]) return; // already loaded
+  // ------- STRATEGY -------
+  const runStrategy = async () => {
+    setPicking(true);
     try {
-      const res = await axios.get(`${API}/portfolio/history`, { params: { symbol: s, timeframe, limit: 10 }, headers: { Authorization: `Bearer ${token}` } });
-      setHistoryMap(prev => ({ ...prev, [key]: res.data?.items || [] }));
-    } catch { /* ignore */ }
+      const asset_classes = [];
+      if (assetStocks) asset_classes.push('stocks');
+      if (assetETFs) asset_classes.push('etfs');
+      if (assetComms) asset_classes.push('commodities');
+      if (assetMFs) asset_classes.push('mutual_funds');
+      const body = {
+        filters: {
+          risk_tolerance: risk,
+          horizon,
+          asset_classes,
+          market,
+          momentum_preference: momentum,
+          value_preference: value,
+          rsi_min: rsiMin ? parseInt(rsiMin, 10) : null,
+          rsi_max: rsiMax ? parseInt(rsiMax, 10) : null,
+          sectors: null,
+        },
+        prompt: freePrompt || null,
+        top_n: topN,
+        source,
+      };
+      const headers = {
+        ...(llmKey ? { 'X-LLM-KEY': llmKey, 'X-LLM-PROVIDER': provider, 'X-LLM-MODEL': model } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+      const res = await axios.post(`${API}/strategy/suggest`, body, { headers });
+      setPicks(res.data?.picks || []);
+      if (res.data?.used_ai) toast.success('Strategy refined by AI'); else toast.success('Strategy ready');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed to create strategy');
+    } finally {
+      setPicking(false);
+    }
   };
 
   return (
@@ -377,26 +373,44 @@ function Home() {
                           <Label className="text-sm">Chat ID</Label>
                           <Input data-testid="tg-chatid-input" placeholder="123456789" value={tgChatId} onChange={e=>setTgChatId(e.target.value)} />
                         </div>
-                        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                        <div style={{ display:'grid', gridTemplateColumns:'repeat(5,minmax(0,1fr))', gap:10 }}>
                           <div>
-                            <Label className="text-sm">Buy threshold</Label>
+                            <Label className="text-sm">Buy ≥</Label>
                             <Input data-testid="tg-buy-input" type="number" min={0} max={100} value={tgBuy} onChange={e=>setTgBuy(parseInt(e.target.value||'80',10))} />
                           </div>
                           <div>
-                <div>
-                  <Label className="text-sm">Data Source</Label>
-                  <Select value={source} onValueChange={setSource}>
-                    <SelectTrigger data-testid="source-select"><SelectValue placeholder="Source" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="yahoo" data-testid="source-yahoo">Yahoo</SelectItem>
-                      <SelectItem value="msn" data-testid="source-msn">MSN</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                            <Label className="text-sm">Sell threshold</Label>
+                            <Label className="text-sm">Sell ≥</Label>
                             <Input data-testid="tg-sell-input" type="number" min={0} max={100} value={tgSell} onChange={e=>setTgSell(parseInt(e.target.value||'60',10))} />
                           </div>
+                          <div>
+                            <Label className="text-sm">Min gap (min)</Label>
+                            <Input data-testid="tg-frequency-input" type="number" min={5} max={1440} value={tgFreq} onChange={e=>setTgFreq(parseInt(e.target.value||'60',10))} />
+                          </div>
+                          <div>
+                            <Label className="text-sm">Quiet start</Label>
+                            <Input data-testid="tg-quiet-start-input" type="number" min={0} max={23} value={tgQuietStart} onChange={e=>setTgQuietStart(parseInt(e.target.value||'22',10))} />
+                          </div>
+                          <div>
+                            <Label className="text-sm">Quiet end</Label>
+                            <Input data-testid="tg-quiet-end-input" type="number" min={0} max={23} value={tgQuietEnd} onChange={e=>setTgQuietEnd(parseInt(e.target.value||'7',10))} />
+                          </div>
+                        </div>
+                        <div>
+                          <Label className="text-sm">Timezone</Label>
+                          <Input data-testid="tg-timezone-input" value={tgTz} onChange={e=>setTgTz(e.target.value)} />
+                        </div>
+                      </div>
+                      <div className="grid" style={{ gap: 8 }}>
+                        <Label className="text-sm">Per-symbol thresholds</Label>
+                        <div className="text-xs text-slate-500">Click a value to edit. Unset values fall back to global thresholds.</div>
+                        <div className="panel" style={{ padding: 10 }}>
+                          {symbols.map(sym => (
+                            <div key={sym} style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap: 10, alignItems:'center', marginBottom: 6 }}>
+                              <div style={{ fontWeight:600 }}>{sym}</div>
+                              <Input data-testid={`sym-${sym}-buy`} type="number" min={0} max={100} value={thresholdsMap[sym]?.buy_threshold ?? ''} placeholder={`Buy ≥ ${tgBuy}`} onChange={e=> setThresholdsMap(prev=> ({ ...prev, [sym]: { ...(prev[sym]||{}), buy_threshold: e.target.value? parseInt(e.target.value,10): undefined } })) } />
+                              <Input data-testid={`sym-${sym}-sell`} type="number" min={0} max={100} value={thresholdsMap[sym]?.sell_threshold ?? ''} placeholder={`Sell ≥ ${tgSell}`} onChange={e=> setThresholdsMap(prev=> ({ ...prev, [sym]: { ...(prev[sym]||{}), sell_threshold: e.target.value? parseInt(e.target.value,10): undefined } })) } />
+                            </div>
+                          ))}
                         </div>
                       </div>
                     </div>
@@ -513,6 +527,16 @@ function Home() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div>
+                  <Label className="text-sm">Data Source</Label>
+                  <Select value={source} onValueChange={setSource}>
+                    <SelectTrigger data-testid="source-select"><SelectValue placeholder="Source" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="yahoo" data-testid="source-yahoo">Yahoo</SelectItem>
+                      <SelectItem value="msn" data-testid="source-msn">MSN</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <div className="list" style={{ marginTop: 12 }}>
                 {symbols.map(s => (
@@ -524,6 +548,95 @@ function Home() {
               {!llmKey && (
                 <div className="text-sm" style={{ color:'#b45309', marginTop: 10 }} data-testid="missing-key-banner">
                   Set your session API key in Profile to enable AI analysis.
+                </div>
+              )}
+            </div>
+
+            {/* Strategy Builder */}
+            <div className="panel" style={{ padding: 16, marginTop: 16 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom: 8 }}>
+                <Wand2 size={18} color="#0ea5a4" />
+                <div className="font-semibold">Strategy Builder</div>
+              </div>
+              <div className="grid" style={{ gridTemplateColumns:'repeat(6,minmax(0,1fr))', gap:12 }}>
+                <div>
+                  <Label className="text-sm">Risk</Label>
+                  <Select value={risk} onValueChange={setRisk}>
+                    <SelectTrigger data-testid="risk-select"><SelectValue placeholder="Risk" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-sm">Horizon</Label>
+                  <Select value={horizon} onValueChange={setHorizon}>
+                    <SelectTrigger data-testid="horizon-select"><SelectValue placeholder="Horizon" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="intraday">Intraday</SelectItem>
+                      <SelectItem value="daily">Daily</SelectItem>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="longterm">Long term</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-sm">RSI min</Label>
+                  <Input data-testid="rsi-min-input" value={rsiMin} onChange={e=>setRsiMin(e.target.value)} placeholder="e.g. 30" />
+                </div>
+                <div>
+                  <Label className="text-sm">RSI max</Label>
+                  <Input data-testid="rsi-max-input" value={rsiMax} onChange={e=>setRsiMax(e.target.value)} placeholder="e.g. 70" />
+                </div>
+                <div>
+                  <Label className="text-sm">Top N</Label>
+                  <Input data-testid="topn-input" type="number" min={1} max={10} value={topN} onChange={e=>setTopN(parseInt(e.target.value||'5',10))} />
+                </div>
+                <div>
+                  <Label className="text-sm">Asset classes</Label>
+                  <div className="list">
+                    <span className="chip" data-testid="asset-stocks" onClick={()=>setAssetStocks(v=>!v)} style={{ background: assetStocks? '#0ea5a4' : undefined, color: assetStocks? '#fff' : undefined }}>Stocks</span>
+                    <span className="chip" data-testid="asset-etfs" onClick={()=>setAssetETFs(v=>!v)} style={{ background: assetETFs? '#0ea5a4' : undefined, color: assetETFs? '#fff' : undefined }}>ETFs</span>
+                    <span className="chip" data-testid="asset-comms" onClick={()=>setAssetComms(v=>!v)} style={{ background: assetComms? '#0ea5a4' : undefined, color: assetComms? '#fff' : undefined }}>Commodities</span>
+                    <span className="chip" data-testid="asset-mfs" onClick={()=>setAssetMFs(v=>!v)} style={{ background: assetMFs? '#0ea5a4' : undefined, color: assetMFs? '#fff' : undefined }}>Mutual Funds</span>
+                  </div>
+                </div>
+              </div>
+              <div className="grid" style={{ marginTop: 12 }}>
+                <Label className="text-sm">Extra prompt (optional)</Label>
+                <Textarea data-testid="strategy-prompt" placeholder="e.g. Prefer largecap IT with positive momentum" value={freePrompt} onChange={e=>setFreePrompt(e.target.value)} />
+              </div>
+              <div style={{ display:'flex', gap:10, marginTop: 12 }}>
+                <Button className="btn-primary" onClick={runStrategy} data-testid="run-strategy-button" disabled={picking}>{picking? 'Building...' : 'Build strategy'}</Button>
+              </div>
+              {picks.length>0 && (
+                <div className="card-grid" style={{ marginTop: 16 }}>
+                  {picks.map((p)=> (
+                    <div key={p.symbol} className="card card-col-span-6">
+                      <Card data-testid={`strategy-pick-${p.symbol}`}>
+                        <CardHeader style={{ display:'flex', flexDirection:'row', alignItems:'center', justifyContent:'space-between' }}>
+                          <CardTitle className="card-title">{p.symbol} <span className="text-slate-500" style={{ fontWeight:500 }}>• {p.asset_class?.toUpperCase?.() || 'ASSET'}</span></CardTitle>
+                          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                            <span className={`badge ${p.action}`} data-testid={`strategy-action-${p.symbol}`}>{formatAction(p.action)}</span>
+                            <Button variant="outline" onClick={()=> addToWatchlist(p.symbol)} data-testid={`strategy-add-${p.symbol}`}>Add</Button>
+                            <Button className="btn-primary" onClick={()=> analyze(p.symbol)} data-testid={`strategy-analyze-${p.symbol}`}>Analyze</Button>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="text-sm text-slate-600">Score: {Math.round(p.score)}%</div>
+                          {p.reasons?.length>0 && (
+                            <ul className="mt-2" style={{ paddingLeft: 18 }}>
+                              {p.reasons.map((r, idx)=> (
+                                <li key={idx} className="text-sm" data-testid={`strategy-reason-${p.symbol}-${idx}`}>• {r}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -545,7 +658,6 @@ function Home() {
               const loading = !!loadingMap[s];
               const action = rec?.action || 'hold';
               const histKey = `${s}-${timeframe}`;
-              const historyItems = historyMap[histKey] || [];
               return (
                 <div key={s} className="card card-col-span-6">
                   <Card data-testid={`analysis-card-${s}`}>
@@ -560,7 +672,7 @@ function Home() {
                       </div>
                     </CardHeader>
                     <CardContent>
-                      <Tabs value={activeTab} onValueChange={(v)=>{ setActiveTab(v); if (v==='history') fetchHistory(s); }}>
+                      <Tabs defaultValue="current">
                         <TabsList>
                           <TabsTrigger value="current" data-testid={`tab-current-${s}`}>Current</TabsTrigger>
                           <TabsTrigger value="history" data-testid={`tab-history-${s}`}>History</TabsTrigger>
@@ -587,26 +699,7 @@ function Home() {
                           )}
                         </TabsContent>
                         <TabsContent value="history">
-                          {isAuthed ? (
-                            <div className="text-sm text-slate-700" data-testid={`history-list-${s}`}>
-                              {historyItems.length === 0 ? (
-                                <div className="text-slate-500">No history yet.</div>
-                              ) : (
-                                <ul style={{ paddingLeft: 18 }}>
-                                  {historyItems.map((it, idx) => (
-                                    <li key={idx} style={{ marginBottom: 8 }}>
-                                      <div style={{ display:'flex', justifyContent:'space-between' }}>
-                                        <span>{new Date(it.created_at || it.recommendation?.generated_at || Date.now()).toLocaleString()}</span>
-                                        <span style={{ fontWeight:600 }}>{(it.recommendation?.action || '').toUpperCase()} • {Math.round(it.recommendation?.confidence ?? 0)}%</span>
-                                      </div>
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="text-sm text-slate-500">Login to view history</div>
-                          )}
+                          <div className="text-sm text-slate-500">Login to view history</div>
                         </TabsContent>
                       </Tabs>
                     </CardContent>
@@ -617,7 +710,7 @@ function Home() {
           </div>
         </section>
 
-        <footer className="footer">Built for speed: Google login + Profile + Telegram alerts + Watchlist persistence (server). Set your model/provider and session key to enable analysis.</footer>
+        <footer className="footer">Built for speed: Strategy Builder + Google login + Profile + Telegram alerts + Watchlist persistence. Set your model/provider and session key to enable analysis.</footer>
       </main>
 
       <Toaster position="top-right" richColors />
