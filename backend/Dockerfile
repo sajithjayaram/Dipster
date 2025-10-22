@@ -27,4 +27,8 @@ EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/').read()" || exit 1
 
 # Run
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8001"]
+# Entrypoint supports docker secrets via *_FILE and /run/secrets
+COPY backend/docker-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+CMD ["/entrypoint.sh"]
