@@ -24,6 +24,9 @@ FROM nginx:1.27-alpine AS frontend
 # Copy build
 COPY --from=builder /app/build /usr/share/nginx/html
 
+# Use hardened nginx config
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+
 # Optional: small nginx config improvements
 RUN sed -i 's/sendfile\s\s*on;/sendfile on;\n    gzip on;\n    gzip_types text\/css application\/javascript application\/json text\/javascript text\/plain;/' /etc/nginx/nginx.conf
 
