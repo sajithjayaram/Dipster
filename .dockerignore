@@ -1,0 +1,27 @@
+# General
+**/.DS_Store
+**/.env
+**/.env.*
+**/.pytest_cache
+**/.mypy_cache
+**/__pycache__
+**/.venv
+**/venv
+**/.vscode
+
+# Node
+frontend/node_modules
+frontend/build
+
+# Python
+backend/*.pyc
+backend/*.pyo
+backend/*.pyd
+backend/.python-version
+backend/.ruff_cache
+backend/.pytest_cache
+backend/.mypy_cache
+
+# Docker
+**/Dockerfile*
+**/docker-compose*

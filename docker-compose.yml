@@ -1,0 +1,56 @@
+version: "3.9"
+
+services:
+  mongo:
+    image: mongo:6
+    container_name: nudg-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: nudg-backend
+    restart: unless-stopped
+    environment:
+      # Database
+      - MONGO_URL=mongodb://mongo:27017
+      - DB_NAME=nudg_db
+      # CORS origins (frontend URL)
+      - CORS_ORIGINS=http://localhost:3000
+      # Optional integrations (fill if needed)
+      # - OPENAI_API_KEY=
+      # - GOOGLE_CLIENT_ID=
+      # - GOOGLE_CLIENT_SECRET=
+      # - GOOGLE_REDIRECT_URI=http://localhost:8001/api/auth/google/callback
+      # - TELEGRAM_BOT_TOKEN=
+      # JWT settings (defaults exist in code)
+      - JWT_SECRET=dev-secret-not-for-prod
+      - JWT_ALGO=HS256
+      - JWT_EXPIRE_MIN=10080
+    ports:
+      - "8001:8001"
+    depends_on:
+      - mongo
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # Frontend calls backend via this public URL from the browser
+        REACT_APP_BACKEND_URL: http://localhost:8001
+    container_name: nudg-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  mongo_data:
+    driver: local
