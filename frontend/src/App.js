@@ -327,8 +327,8 @@ function Home() {
           <div className="brand" style={{ flex: '1 1 auto' }}>
             <BarChart3 size={22} color="#0ea5a4" />
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <div className="brand-title">Dipster</div>
-              <div className="brand-tagline">Buy Low. Chill High.</div>
+              <div className="brand-title">Nudg</div>
+              <div className="brand-tagline">Advice that nudges you, forward</div>
             </div>
             <span className="brand-badge" data-testid="brand-badge">{timeframe === 'weekly' ? 'Weekly' : timeframe === 'daily' ? 'Daily' : 'Intraday'} • {market === 'IN' ? 'India' : market === 'US' ? 'US' : 'Other'}</span>
           </div>
@@ -474,9 +474,9 @@ function Home() {
       <main className="container" style={{ flex: 1 }}>
         <section className="hero">
           <div>
-            <h1 className="text-4xl md:text-5xl font-bold" data-testid="hero-title">AI buy/sell guidance for Indian markets</h1>
+            <h1 className="text-4xl md:text-5xl font-bold" data-testid="hero-title">Actionable buy/sell nudges for Indian markets</h1>
             <p className="mt-3 text-slate-600 max-w-2xl" data-testid="hero-subtitle">
-              Track stocks, mutual funds and commodities. Get weekly recommendations with clear reasoning. Data powered by Yahoo Finance.
+              Track stocks and build strategies with concise, data‑driven signals.
             </p>
             <div className="panel" style={{ padding: 16, marginTop: 16 }}>
               <div className="search-grid">
@@ -642,7 +642,6 @@ function Home() {
               <div className="text-sm text-slate-600">Tip: NSE tickers use .NS suffix. Example: TCS.NS, INFY.NS, RELIANCE.NS</div>
             </div>
             <Separator className="my-4" />
-            <div className="text-xs text-slate-500">Providers: OpenAI, Claude, Gemini. Keys are per-session only and never stored server-side.</div>
           </div>
         </section>
 
@@ -652,7 +651,6 @@ function Home() {
               const rec = recs[s];
               const loading = !!loadingMap[s];
               const action = rec?.action || 'hold';
-              const histKey = `${s}-${timeframe}`;
               return (
                 <div key={s} className="card card-col-span-6">
                   <Card data-testid={`analysis-card-${s}`}>
@@ -705,7 +703,7 @@ function Home() {
           </div>
         </section>
 
-        <footer className="footer">Dipster • Buy Low. Chill High. Strategy Builder + Google login + Profile + Telegram alerts + Watchlist persistence. Set your model/provider and session key to enable analysis.</footer>
+        <footer className="footer">Nudg • Advice that nudges you, forward</footer>
       </main>
 
       <Toaster position="top-right" richColors />
